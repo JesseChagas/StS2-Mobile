@@ -5,7 +5,7 @@ namespace STS2Mobile.Launcher.Design;
 
 public static class LauncherVersion
 {
-    public const string Revision = "9.10 · Steam P2P";
+    public const string Revision = "9.11 · Steam P2P";
     private static readonly Lazy<string> Display = new(ReadVersion);
     public static string Text => Display.Value;
 

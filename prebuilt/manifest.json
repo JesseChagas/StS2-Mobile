@@ -1,6 +1,6 @@
 {
-  "revision": "steam-p2p-v11",
-  "sha256": "bf05867a157e3065ba80f1438868b060f0804eb1f3e8f0d1007bdd25dad9f4bb",
+  "revision": "steam-p2p-v12",
+  "sha256": "1f8a50c47510874c6f41a062f82d82a645f4997508fe0ea48a80a4392a925472",
   "game_reference_sha256": "62ecbe91093e1fa862de4329aac865209dcb297804caf0f0520d92d8c0b4a9c3",
   "godotsharp": "4.5.1",
   "harmony": "2.4.2",
@@ -28,5 +28,6 @@
       "name": "ZstdSharp.dll",
       "sha256": "177f541b9bba3cfe89d3fe9565ea9f78285ef8499d689dcfd5de0018b6fa43e5"
     }
-  ]
+  ],
+  "host_visibility_test_performed": false
 }

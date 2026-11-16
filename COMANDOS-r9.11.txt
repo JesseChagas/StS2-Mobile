@@ -1,0 +1,29 @@
+STS2 Mobile r9.11
+
+1. Com o celular conectado e a depuracao USB autorizada, abra PowerShell na pasta StS2-Launcher-main extraida do ZIP.
+
+powershell -NoProfile -ExecutionPolicy Bypass -File .\ATUALIZAR-CELULAR.ps1
+
+O script procura original.apk, apktool e uber-apk-signer em Downloads ou nos ZIPs de backup em Downloads/STS2-Guardado. Recupera apenas esses arquivos para a pasta externos. Requer Java e adb no PATH. Nao desinstala o aplicativo.
+
+2. Somente gerar e assinar o APK:
+
+powershell -NoProfile -ExecutionPolicy Bypass -File .\ATUALIZAR-CELULAR.ps1 -SomenteBuild
+
+3. Em outro terminal, antes de testar:
+
+powershell -NoProfile -ExecutionPolicy Bypass -File .\CAPTURAR-STEAM.ps1
+
+O TXT e salvo na Area de Trabalho. Encerre com Ctrl+C e envie o arquivo.
+
+4. Teste o login: entre com a conta, abra o Steam Guard, confirme e volte. Se o Android fechar completamente o launcher, abra-o novamente dentro de dez minutos. A retomada depende de a Steam ainda aceitar a solicitacao.
+
+5. Teste o host: crie uma sala Steam e fique na selecao de personagem. O amigo deve abrir/atualizar a lista de salas no jogo dele. Se nao aparecer, capture o TXT mesmo assim; o novo log inclui confirmacao de entrada e disponibilidade e consulta de presenca.
+
+Compilar C# a partir dos fontes (requer .NET 9 e referencias privadas do jogo em upstream):
+
+dotnet restore .\src\STS2Mobile\STS2Mobile.csproj
+dotnet publish .\src\STS2Mobile\STS2Mobile.csproj -c Release --no-restore -m:1
+powershell -NoProfile -ExecutionPolicy Bypass -File .\REBUILD-APK.ps1 -Install
+
+A DLL precompilada incluida permite rebuild sem recompilar C#. Nenhuma senha/codigo Steam e incluido neste ZIP.

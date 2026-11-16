@@ -60,7 +60,7 @@ internal partial class SteamReauthenticationDialog : ColorRect
         working = true; login.SetDisabled(true); login.ClearPassword();
         ConnectionReport.Step("steam-reauth", "Renewing Steam authorization", "Renovando a autorização Steam");
         status.Text = en ? "Authenticating with Steam…" : "Autenticando na Steam…";
-        using var attempt = new SteamAuth(); auth = attempt;
+        using var attempt = new SteamAuth(OS.GetDataDir()); auth = attempt;
         attempt.NoticeReceived += notice => Dispatch(() => {
             if (notice == AuthNotice.ApproveDevice) {
                 login.Visible = false;
@@ -95,6 +95,7 @@ internal partial class SteamReauthenticationDialog : ColorRect
             if (closed) return;
             // Persist only after an actual CM logon and ownership check succeed.
             store.Save(result.AccountName, result.RefreshToken, result.GuardData);
+            attempt.ClearPending();
             STS2Mobile.Patches.LauncherPatches.SavedAccountName = result.AccountName;
             STS2Mobile.Patches.LauncherPatches.SavedRefreshToken = result.RefreshToken;
             SharedSteamConnection.KeepForGame(result.AccountName, result.RefreshToken);
@@ -121,7 +122,7 @@ internal partial class SteamReauthenticationDialog : ColorRect
     public void Cancel()
     {
         if (closed) return;
-        closed = true; cancelled.Cancel(); code?.TrySetCanceled(); auth?.Dispose();
+        closed = true; cancelled.Cancel(); code?.TrySetCanceled(); auth?.ClearPending(); auth?.Dispose();
         completion.TrySetResult(false);
     }
 }

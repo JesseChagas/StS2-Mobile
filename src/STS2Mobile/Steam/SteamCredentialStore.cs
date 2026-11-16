@@ -115,7 +115,7 @@ public class SteamCredentialStore
         PatchHelper.Log("[Credentials] Cleared");
     }
 
-    private static GodotObject GetGodotApp()
+    internal static GodotObject GetGodotApp()
     {
         try
         {

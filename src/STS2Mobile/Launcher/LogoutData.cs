@@ -10,7 +10,7 @@ public static class LogoutData
 {
     public static void RemoveAccountFiles(string dataDir)
     {
-        foreach (var name in new[] { "steam_credentials.enc", "ownership_verified.enc" })
+        foreach (var name in new[] { "steam_credentials.enc", "ownership_verified.enc", "steam_pending_auth.enc", "steam_pending_auth.enc.tmp" })
         {
             var path = Path.Combine(dataDir, name);
             File.Delete(path);

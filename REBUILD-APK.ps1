@@ -3,8 +3,11 @@ $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'APK-HELPERS.ps1')
 $projeto = $PSScriptRoot
 $downloads = Join-Path $env:USERPROFILE 'Downloads'
-$original = Join-Path $downloads 'original.apk'
-$marker = '[build=mobile-steam-p2p-v11]'
+$externos = @((Join-Path $projeto 'externos'), (Join-Path (Split-Path -Parent $projeto) 'externos'), $downloads) |
+    Where-Object { Test-Path -LiteralPath (Join-Path $_ 'original.apk') } | Select-Object -First 1
+if (-not $externos) { throw 'original.apk nao encontrado. Execute ATUALIZAR-CELULAR.ps1 para recuperar do backup.' }
+$original = Join-Path $externos 'original.apk'
+$marker = '[build=mobile-steam-p2p-v12]'
 $commands = @('java')
 if (-not $UsePrebuilt) { $commands += 'dotnet' }
 if ($Install) { $commands += 'adb' }
@@ -13,10 +16,10 @@ foreach ($command in $commands) {
 }
 if (-not (Test-Path -LiteralPath $original)) { throw "APK nao encontrado: $original" }
 if (-not ([IO.File]::ReadAllText((Join-Path $projeto 'src\STS2Mobile\ModEntry.cs')).Contains($marker))) {
-    throw 'Os fontes nao sao da integracao Steam P2P v11. Extraia novamente o ZIP completo.'
+    throw 'Os fontes nao sao da integracao Steam P2P v12. Extraia novamente o ZIP completo.'
 }
 function Localizar-Jar([string]$Filter) {
-    $files = @(Get-ChildItem -LiteralPath $downloads -Filter $Filter -Recurse -File -ErrorAction SilentlyContinue)
+    $files = @(Get-ChildItem -LiteralPath $externos -Filter $Filter -Recurse -File -ErrorAction SilentlyContinue)
     if ($files.Count -ne 1) {
         $files.FullName | Out-Host
         throw "Esperava um arquivo $Filter em Downloads; encontrei $($files.Count)."
@@ -147,7 +150,7 @@ if ($Install) {
                 }
             }
         }
-        if (-not $loaded) { throw "A abertura do launcher Steam P2P v11 nao foi confirmada em execucao. Log: $logPath" }
+        if (-not $loaded) { throw "A abertura do launcher Steam P2P v12 nao foi confirmada em execucao. Log: $logPath" }
         Write-Host 'CONFIRMADO: STS 2 Mobile instalado, interface nova confirmada.' -ForegroundColor Green
         Write-Host 'Agora inicie o jogo pelo launcher. Pressione Enter aqui depois do resultado.'
         Read-Host | Out-Null

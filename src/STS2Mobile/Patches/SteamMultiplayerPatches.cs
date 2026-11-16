@@ -45,7 +45,7 @@ public static class SteamMultiplayerPatches
         var popup = AccessTools.Method(typeof(MegaCrit.Sts2.Core.Nodes.CommonUi.NErrorPopup), "Create", new[] { typeof(NetErrorInfo) });
         harmony.Patch(popup, prefix: new HarmonyMethod(PatchHelper.Method(typeof(SteamMultiplayerPatches), nameof(AdapterErrorPopup))));
         try { SteamHostingPatches.Apply(harmony); } catch (Exception e) { PatchHelper.Log("[SteamHost] Registro indisponível: " + e); }
-        PatchHelper.Log("[SteamMP] Integração Steam Android registrada [steam-p2p-v11]");
+        PatchHelper.Log("[SteamMP] Integração Steam Android registrada [steam-p2p-v12]");
     }
 
     public static bool LocalId(ref ulong __result)

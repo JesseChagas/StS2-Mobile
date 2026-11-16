@@ -245,6 +245,11 @@ public sealed class LauncherController : IDisposable
             case FastPathResult.ReadyToLaunch:
                 ShowReady();
                 break;
+            case FastPathResult.ResumeAuthentication:
+                _view.SetAuthentication(true);
+                _view.Login.Visible = false;
+                _ = _model.ResumePendingAuthenticationAsync();
+                break;
             case FastPathResult.AutoConnect:
                 _view.SetAuthentication(false);
                 _model.Connect();

@@ -13,6 +13,7 @@ internal sealed class MobileSteamHostSession : IDisposable
     private readonly SteamConnection connection;
     private readonly IDisposable hold;
     private readonly List<IDisposable> subscriptions = new();
+    private readonly SemaphoreSlim availability = new(1, 1);
     private readonly List<(ulong Peer, byte[] Bytes, DateTimeOffset Expires)> pending = new();
     private readonly HashSet<ulong> accepted = new();
     private SteamHostSignaling signaling;
@@ -66,6 +67,17 @@ internal sealed class MobileSteamHostSession : IDisposable
         }
         if (reply.Result != EResult.OK || reply.AppID != SteamFriendLobbyClient.AppId) throw new IOException("Criação da sala Steam recusada: " + reply.Result);
         LobbyId = reply.LobbySteamID.ConvertToUInt64();
+        // A create reply and SteamKit's synthetic owner/member cache are not an
+        // entry acknowledgement. Complete the actual membership step before
+        // exposing this lobby or accepting peers.
+        var entered = await Matchmaking.JoinLobby(SteamFriendLobbyClient.AppId, reply.LobbySteamID)
+            .ToTask().WaitAsync(TimeSpan.FromSeconds(12), token);
+        if (entered.AppID != SteamFriendLobbyClient.AppId || entered.ChatRoomEnterResponse != EChatRoomEnterResponse.Success
+            || entered.Lobby?.SteamID.ConvertToUInt64() != LobbyId
+            || entered.Lobby.OwnerSteamID?.ConvertToUInt64() != Self
+            || !entered.Lobby.Members.Any(x => x.SteamID.ConvertToUInt64() == Self))
+            throw new IOException("A Steam não confirmou a entrada do anfitrião na própria sala.");
+        ConnectionReport.Note($"host-lobby-entered={LobbyId}; owner={Self}; members={entered.Lobby.NumMembers}");
         var data = await Matchmaking.GetLobbyData(SteamFriendLobbyClient.AppId, reply.LobbySteamID).ToTask().WaitAsync(TimeSpan.FromSeconds(8), token);
         if (data.AppID != SteamFriendLobbyClient.AppId || data.Lobby.OwnerSteamID?.ConvertToUInt64() != Self) throw new IOException("A Steam não confirmou a propriedade da sala criada.");
         ConnectionReport.Step("host-certificate-request", "Requesting the host network certificate", "Solicitando certificado de rede do anfitrião");
@@ -87,11 +99,40 @@ internal sealed class MobileSteamHostSession : IDisposable
         catch (Exception e) { PatchHelper.Log("[SteamHost] Limpeza de criação tardia: " + e.GetType().Name); }
     }
     public async Task SetClosedAsync(bool closed, CancellationToken token = default) {
-        Native?.SetHostClosed(closed);
-        if (LobbyId == 0 || disposed) return;
-        var result = await Matchmaking.SetLobbyData(SteamFriendLobbyClient.AppId, new SteamID(LobbyId), closed ? ELobbyType.Private : ELobbyType.FriendsOnly, capacity)
-            .ToTask().WaitAsync(TimeSpan.FromSeconds(8), token);
-        if (result.Result != EResult.OK) throw new IOException("A Steam não atualizou a disponibilidade da sala: " + result.Result);
+        await availability.WaitAsync(token);
+        try {
+            if (LobbyId == 0 || disposed) return;
+            Native?.SetHostClosed(closed);
+            var type = closed ? ELobbyType.Private : ELobbyType.FriendsOnly;
+            var result = await Matchmaking.SetLobbyData(SteamFriendLobbyClient.AppId, new SteamID(LobbyId), type, capacity)
+                .ToTask().WaitAsync(TimeSpan.FromSeconds(8), token);
+            if (result.Result != EResult.OK) throw new IOException("A Steam não atualizou a disponibilidade da sala: " + result.Result);
+            if (disposed) return;
+            var published = await Matchmaking.GetLobbyData(SteamFriendLobbyClient.AppId, new SteamID(LobbyId))
+                .ToTask().WaitAsync(TimeSpan.FromSeconds(8), token);
+            if (disposed) return;
+            var lobby = published.Lobby;
+            if (published.AppID != SteamFriendLobbyClient.AppId || lobby?.SteamID.ConvertToUInt64() != LobbyId
+                || lobby.OwnerSteamID?.ConvertToUInt64() != Self || lobby.LobbyType != type)
+                throw new IOException("A Steam não confirmou a publicação da disponibilidade da sala.");
+            // Refresh activity after membership/visibility changes, rather than
+            // relying only on the activity sent before this lobby existed.
+            var activity = new ClientMsgProtobuf<CMsgClientGamesPlayed>(EMsg.ClientGamesPlayed);
+            activity.Body.games_played.Add(new CMsgClientGamesPlayed.GamePlayed { game_id = SteamFriendLobbyClient.AppId });
+            Client.Send(activity);
+            Client.GetHandler<SteamFriends>().RequestFriendInfo(new SteamID(Self), SteamKitLobbyGateway.RequestedFlags);
+            ConnectionReport.Note($"host-lobby-availability={type}; lobby={LobbyId}; members={lobby.NumMembers}; flags={lobby.LobbyFlags}");
+            if (!closed) _ = ReportPresenceAsync();
+        } finally { availability.Release(); }
+    }
+    private async Task ReportPresenceAsync() {
+        try {
+            await Task.Delay(2500);
+            if (!Alive) return;
+            if (connection.FriendDirectory.TryGetCurrent(Self, out var room))
+                ConnectionReport.Note($"host-self-presence: app={room.AppId}; lobby={room.LobbyId}; expected={LobbyId}; matches={room.AppId == SteamFriendLobbyClient.AppId && room.LobbyId == LobbyId}");
+            else ConnectionReport.Note("host-self-presence: Steam did not return a complete self presence; visibility on a friend's account is not confirmed.");
+        } catch (Exception e) { PatchHelper.Log("[SteamHost] Presença: " + e.GetType().Name); }
     }
     public void MarkAccepted(ulong peer, bool value) { if (value) accepted.Add(peer); else accepted.Remove(peer); }
     public string PlayerName(ulong peer) => peer == Self ? Client.GetHandler<SteamFriends>().GetPersonaName() : Client.GetHandler<SteamFriends>().GetFriendPersonaName(new SteamID(peer));
@@ -131,10 +172,16 @@ internal sealed class MobileSteamHostSession : IDisposable
                     }
                 }
             } finally { Native?.Dispose(); signaling?.Unregister(); }
-            if (Client.IsConnected) {
-                if (LobbyId != 0) await Matchmaking.LeaveLobby(SteamFriendLobbyClient.AppId, new SteamID(LobbyId)).ToTask().WaitAsync(TimeSpan.FromSeconds(5));
-                if (context) Client.Send(new ClientMsgProtobuf<CMsgClientGamesPlayed>(EMsg.ClientGamesPlayed));
-            }
+            await availability.WaitAsync();
+            try {
+                if (Client.IsConnected) {
+                    try {
+                        if (LobbyId != 0) await Matchmaking.LeaveLobby(SteamFriendLobbyClient.AppId, new SteamID(LobbyId)).ToTask().WaitAsync(TimeSpan.FromSeconds(5));
+                    } finally {
+                        if (context && Client.IsConnected) Client.Send(new ClientMsgProtobuf<CMsgClientGamesPlayed>(EMsg.ClientGamesPlayed));
+                    }
+                }
+            } finally { availability.Release(); }
         } catch (Exception e) { PatchHelper.Log("[SteamHost] Encerramento: " + e.GetType().Name); }
         finally { foreach (var item in subscriptions) item.Dispose(); hold.Dispose(); }
     }

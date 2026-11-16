@@ -72,7 +72,7 @@ internal static class ConnectionReport
         }
     }
     public static string Diagnostics {
-        get { lock (gate) return $"STS2 Mobile r9.10\nStage: {stage}\nHost: {host}\n" + string.Join("\n", trace) + "\n" + error; }
+        get { lock (gate) return $"STS2 Mobile r9.11\nStage: {stage}\nHost: {host}\n" + string.Join("\n", trace) + "\n" + error; }
     }
     private static string Sanitize(string text)
     {

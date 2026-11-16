@@ -54,7 +54,7 @@ public static class ModEntry
             return;
         _applied = true;
 
-        PatchHelper.Log("Initializing STS2Mobile... [build=mobile-steam-p2p-v11]");
+        PatchHelper.Log("Initializing STS2Mobile... [build=mobile-steam-p2p-v12]");
 
         _harmony = new Harmony("com.sts2mobile");
 
@@ -77,7 +77,7 @@ public static class ModEntry
             EarlyAccessDisclaimerPatches.Apply(_harmony);
             CombatBackgroundPatches.Apply(_harmony);
             LanMultiplayerPatcher.Apply(_harmony);
-            PatchHelper.Log("[SteamMP] Registro adiado ate o jogo estar carregado [steam-p2p-v11]");
+            PatchHelper.Log("[SteamMP] Registro adiado ate o jogo estar carregado [steam-p2p-v12]");
             ModLoaderPatches.Apply(_harmony);
             LauncherPatches.Apply(_harmony);
             SaveDiagnosticPatches.Apply(_harmony);

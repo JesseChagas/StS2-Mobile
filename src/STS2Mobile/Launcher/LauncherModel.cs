@@ -124,6 +124,11 @@ public class LauncherModel : IDisposable
             LauncherPatches.SavedRefreshToken = _credentialStore.RefreshToken;
         }
 
+        var pendingAccount = SteamAuth.PendingAccount(_dataDir);
+        if (pendingAccount != null && (!_credentialStore.HasCredentials ||
+            string.Equals(pendingAccount, _credentialStore.AccountName, StringComparison.OrdinalIgnoreCase)))
+            return FastPathResult.ResumeAuthentication;
+
         var verifier = CreateOwnershipVerifier();
         var hasMarker = verifier?.HasMarker() ?? false;
         PatchHelper.Log(
@@ -138,6 +143,8 @@ public class LauncherModel : IDisposable
 
         return FastPathResult.ShowLogin;
     }
+
+    public Task ResumePendingAuthenticationAsync() => LoginAsync(SteamAuth.PendingAccount(_dataDir), null);
 
     // Connects on-demand and verifies ownership. Used when we have saved
     // credentials but no ownership marker.
@@ -167,11 +174,12 @@ public class LauncherModel : IDisposable
     // then verifies ownership.
     public async Task LoginAsync(string username, string password)
     {
+        if (_auth != null) return;
         SetState(SessionState.Authenticating);
 
         try
         {
-            _auth = new SteamAuth();
+            _auth = new SteamAuth(_dataDir);
             _auth.LogMessage += msg => LogReceived?.Invoke(msg);
             _auth.NoticeReceived += notice => AuthNoticeReceived?.Invoke(notice);
             _auth.CodeProvider = async (wasIncorrect) =>
@@ -191,13 +199,12 @@ public class LauncherModel : IDisposable
             };
 
             _auth.Connect();
-            var result = await _auth.LoginWithCredentialsAsync(
-                username,
-                password,
-                _credentialStore.GuardData
-            );
+            var result = password == null
+                ? await _auth.ResumePendingAsync()
+                : await _auth.LoginWithCredentialsAsync(username, password, _credentialStore.GuardData);
 
             _credentialStore.Save(result.AccountName, result.RefreshToken, result.GuardData);
+            _auth.ClearPending();
             LauncherPatches.SavedAccountName = result.AccountName;
             LauncherPatches.SavedRefreshToken = result.RefreshToken;
 
@@ -211,8 +218,10 @@ public class LauncherModel : IDisposable
         {
             PatchHelper.Log($"[Launcher] Login failed: {ex.Message}");
             SetState(SessionState.Failed, ex.Message);
+            _auth?.ClearPending();
             _auth?.Dispose();
             _auth = null;
+            AwaitingCode = false;
         }
     }
 
