@@ -1,126 +1,61 @@
-# StS2 Launcher
+# StS2 Mobile
 
-An Android launcher for Slay the Spire 2, built on a custom Godot 4.5.1 engine with .NET/Mono and Harmony runtime patching.
+Unofficial Android launcher for **Slay the Spire 2**, maintained by **Jessé Chagas**, based on [Ekyso/StS2-Launcher](https://github.com/Ekyso/StS2-Launcher).
 
-> **Disclaimer**: This is an unofficial community project. Slay the Spire 2 is developed and published by Mega Crit Games. A valid Steam account that owns Slay the Spire 2 is required. Game files are downloaded directly from Steam after authentication. No game assets are included in this repository.
+A Steam account that owns Slay the Spire 2 is required. The launcher downloads game files directly from Steam after authentication. This repository does not include the game, `sts2.dll`, proprietary SDKs, Steam credentials, or signing keys. This project is not affiliated with Mega Crit or Valve.
 
-## Features
+## Changes in this fork
 
-- **Steam authentication**  
-  Login via SteamKit2 with Steam Guard 2FA support.
-- **Game file download**  
-  Depot download directly from Steam, with update checking.
-- **Cloud saves**  
-  Full Steam cloud sync via SteamKit2's CCloud API, with timestamp-aware conflict resolution and non-blocking background uploads.
-- **Mobile adaptation**  
-  Touch input, UI scaling, layout adjustments, and app lifecycle handling via Harmony runtime patches.
-- **LAN multiplayer**  
-  UDP broadcast discovery and manual IP join.
-- **Shader warmup**  
-  Vulkan pipeline cache persistence and canvas ubershader support to eliminate first-encounter stutters.
-- **Credential security**  
-  Steam refresh tokens encrypted at rest via Android Keystore (AES-256-GCM, hardware-backed TEE).
+- Steam multiplayer: discover friends' hosted lobbies automatically, or find a host through an optional SteamID64 dialog.
+- Steam hosting from Android, with a separate LAN option and up to four total players.
+- Larger multiplayer room cards and touch controls, with connection diagnostics available separately.
+- Render resolution from **10% to 100%**, in steps of 5%, with linear upscaling and a saved preference. Lower values reduce rendering work but soften text and detail; performance depends on the device.
+- Shared Steam session, improved presence handling and connection cleanup.
+- Installed game version/branch detection and game-file verification.
 
-## How It Works
+## Current version: r9.10
 
-At startup, `STS2Mobile.dll` is loaded via `coreclr_create_delegate` and applies [Harmony](https://github.com/pardeike/Harmony) patches to adapt the desktop game for mobile. The launcher intercepts `GameStartupWrapper()` to present a Steam login screen before the game starts.
+The certificate request now extends SteamKit's internal job timeout from 10 to 30 seconds, allows one retry on timeout, and reports configuration, request and installation separately. Hosting creates a private lobby before requesting its certificate and publishes it to friends only after validation and listener startup.
 
-- **Launcher-only mode**  
-If no game files are present, the app loads a minimal `bootstrap.pck` and shows the launcher UI for Steam login and game download.  
-- **Normal mode**  
-With game files downloaded, all patches apply against `sts2.dll` and the game runs natively after authentication.
+Steam client multiplayer and the previous mobile build were confirmed by the user. The r9.10 certificate correction passed local timeout/retry/cancellation tests; its end-to-end hosting result still needs device confirmation. No claim is made that all phones, networks or game versions have been tested. The transport currently uses direct ICE; Steam Datagram Relay is not implemented. Both players must use compatible game versions, branches, model data and gameplay mods; these checks remain enabled.
 
-## Engine Patches
+See [MULTIPLAYER-STATUS.md](MULTIPLAYER-STATUS.md) for test evidence and limitations.
 
-Custom patches to the Godot 4.5.1 engine source for Android-specific issues:
+## Build on Windows
 
-- **Vulkan pipeline cache persistence**  
-Saves compiled pipelines when the app loses focus, preventing recompilation after Android kills the process.
-- **Canvas ubershaders**  
-Enable ubershader fallback for 2D rendering, eliminating first-encounter VFX stutters from blocking pipeline compilation.
+The rebuild path requires your locally obtained original launcher APK at `%USERPROFILE%\Downloads\original.apk`, Java, and exactly one Apktool JAR and one Uber APK Signer JAR under Downloads. The original APK and tools are not included here. ADB is required only for installation.
 
-## Project Structure
-
-```
-src/STS2Mobile/
-  ModEntry.cs              # Entry point ([UnmanagedCallersOnly] Apply())
-  PatchHelper.cs           # Shared patch utility + logging
-  Patches/                 # Harmony patches (one file per concern)
-  Launcher/                # Programmatic Godot UI (MVC)
-  Steam/                   # SteamKit2 login, depot download, cloud saves
-android/                   # Godot Android gradle project
-  src/.../GodotApp.java    # Activity, assembly setup, Keystore encryption
-  assets/bootstrap.pck     # Minimal PCK for launcher-only mode
-src/stubs/                 # Native library stubs (Steam API, Sentry)
-scripts/                   # Build and tooling scripts
+```powershell
+powershell -ExecutionPolicy Bypass -File .\REBUILD-APK.ps1 -UsePrebuilt
+# With an authorized Android device connected:
+powershell -ExecutionPolicy Bypass -File .\REBUILD-APK.ps1 -UsePrebuilt -Install
 ```
 
-## Prerequisites
+Install the APK from the generated **assinado** folder. The script checks the managed assembly, dependencies, native transport and signed APK. Keep your existing signing key if distributing updates to installed versions.
 
-- .NET 9 SDK
-- Android SDK + NDK (see `android/config.gradle` for versions)
-- Python 3 (for `make-bootstrap-pck.py` and SCons)
-- Original game files in `upstream/godot-export/`
-- Custom Godot engine build (see `scripts/build-godot.sh`)
-- FMOD SDK in `vendor/fmod-sdk/`
+To build the managed assembly from source, install .NET 9 and provide local references under `upstream/godot-export/.godot/mono/publish/arm64/`: `sts2.dll`, `GodotSharp.dll` (4.5.1), and the original compatible `0Harmony.dll` (2.4.2). These files must be supplied locally, never committed. Omit `-UsePrebuilt` to compile during reconstruction.
 
-## Building
+The original Android/engine build scripts remain in `scripts/` and `android/`; they require the custom Godot engine and separately obtained proprietary SDKs described by the upstream project. A clean checkout alone is not a complete engine/SDK distribution.
 
-**Note: This is a WIP. There are other binaries that are required and will fail if you just run the `./build.sh` script. Godot Engine can be found on their repo https://github.com/godotengine/godot. Harmony can be found here https://github.com/Ekyso/Harmony but the version used in StS2 Launcher is compiled using dotnet 9.0. FMOD can be found here https://www.fmod.com/. Spine can be found here https://esotericsoftware.com/. I plan to upload the custom fork of Godot Engine used and the dotnet 9.0 Harmony soon. However, Spine and FMOD will not be uploaded due to licensing restrictions. Information on licensing can be found in the [THIRD-PARTY-NOTICES.txt](https://github.com/Ekyso/StS2-Launcher/blob/main/THIRD_PARTY_LICENSES.md) of the root folder.** 
+Native transport source, build instructions and license notices are in [native/steam-p2p](native/steam-p2p). Android targets ARM64, API 26 and 16 KB ELF alignment. The `prebuilt/` managed assembly and two native transport binaries are included for the rebuild workflow; game and engine assemblies are excluded.
 
-```bash
-bash scripts/build.sh
+## Development tests
+
+```powershell
+dotnet run --project tests/SteamNetworkJobs
+dotnet run --project tests/NativeNetworkDiscovery
 ```
 
-This runs the full pipeline:
-1. `dotnet publish` the patcher (outputs `STS2Mobile.dll` + SteamKit2 dependencies)
-2. Copies published DLLs to `android/assets/dotnet_bcl/`
-3. Copies `libSystem.Security.Cryptography.Native.Android.so` to JNI libs (for TLS)
-4. Bumps the version in `gradle.properties`
-5. Builds the APK via `./gradlew assembleMonoRelease`
+Other integration tests use local game references and, for UI tests, a compatible Godot .NET runtime. Offline fixtures use synthetic callbacks; production certificate and compatibility validation remain active.
 
-Output: `android/build/outputs/apk/mono/release/StS2Launcher-v<version>.apk`
+## Credits and licenses
 
-### Installing
+- **Eky / Ekyso**: original launcher and architecture. Preserve the original [MIT license](LICENSE) and copyright notice.
+- **Jessé Chagas**: this fork's multiplayer integration, mobile interface and graphics options.
+- Dependency notices: [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md) and [native transport notices](native/steam-p2p/THIRD_PARTY.md).
 
-```bash
-adb install -r android/build/outputs/apk/mono/release/StS2Launcher-v*.apk
+The launcher's MIT license does not replace the licenses of the game, engine components or third-party libraries. Game content remains the property of its respective owners.
 
-# Fresh install (clear saved credentials + cached assemblies)
-adb shell pm clear com.game.sts2launcher
-```
+## Website
 
-### Other build tasks
-
-```bash
-# Regenerate bootstrap PCK (only if project.godot changes)
-python3 scripts/make-bootstrap-pck.py
-
-# Rebuild Godot engine (only if engine source changes)
-bash scripts/build-godot.sh
-
-# Rebuild native stubs (requires Android NDK)
-bash src/stubs/build_stubs.sh
-```
-
-## LAN Multiplayer
-
-Both devices must be on the same local network. The mobile app discovers nearby games via UDP broadcast, or you can enter the PC's IP address manually.
-
-On the PC, add `--fastmp` to the Steam launch options:
-**Steam > Slay the Spire 2 > Properties > Launch Options** and enter `--fastmp`
-
-This enables the fast multiplayer mode that the mobile client expects.
-
-## Technical Notes
-
-- Native library stubs (`src/stubs/`) provide no-op `.so` files for desktop-only libraries (Steamworks SDK, Sentry) so the linker is satisfied at runtime.
-- The bootstrap PCK is a minimal `project.godot` wrapper that enables .NET module initialization without game files.
-- The game's Sentry plugin has no `android.arm64` build, so it's disabled via PCK patching and Harmony patches.
-- GodotSharp interop is manually bootstrapped in `ModEntry.cs` since the Godot SDK source generators aren't available.
-
-## License
-
-This project is licensed under the [MIT License](LICENSE). See [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md) for third-party dependency licenses.
-
-FMOD requires a commercial license if your project generates revenue. Spine Runtimes require a valid Spine Editor license. See the third-party licenses file for details.
+The bilingual landing page is a self-contained HTML file at [docs/index.html](docs/index.html), including screenshots, privacy policy and terms. No build or external assets are needed. To host on GitHub Pages, select Settings → Pages → Deploy from a branch → main → /docs. The main download button opens this repository; Releases contains published APKs when available.

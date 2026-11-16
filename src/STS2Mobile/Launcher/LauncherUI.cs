@@ -2,6 +2,7 @@ using System;
 using System.Collections.Concurrent;
 using System.Threading.Tasks;
 using Godot;
+using STS2Mobile.Launcher.Design;
 using STS2Mobile.Patches;
 
 namespace STS2Mobile.Launcher;
@@ -25,7 +26,8 @@ public class LauncherUI : Control
             var vpSize = GetViewport()?.GetVisibleRect().Size ?? new Vector2(1920, 1080);
             SetAnchorsPreset(LayoutPreset.FullRect);
             Size = vpSize;
-            var scale = Math.Max(vpSize.X, vpSize.Y) / 960f;
+            LauncherPreferences.Load();
+            var scale = LauncherView.ScaleFor(vpSize);
 
             _model = new LauncherModel(OS.GetDataDir());
             _model.InGameMode = _inGameMode;
@@ -48,6 +50,7 @@ public class LauncherUI : Control
         GetTree().ProcessFrame += OnProcessFrame;
         TreeExiting += OnExitTree;
         _controller.Start();
+        PatchHelper.Log("[UI] Interface ready [mobile-steam-ui-v8]");
     }
 
     public void SetGameMode(bool inGameMode) => _inGameMode = inGameMode;
@@ -75,6 +78,7 @@ public class LauncherUI : Control
     {
         GetTree().ProcessFrame -= OnProcessFrame;
         GetTree().AutoAcceptQuit = true;
+        _controller?.Dispose();
         _model?.Dispose();
     }
 }

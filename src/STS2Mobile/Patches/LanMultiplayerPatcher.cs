@@ -37,6 +37,16 @@ public static class LanMultiplayerPatcher
     private static LanDiscovery _discovery;
     private static LineEdit _ipLineEdit;
     private static bool _joinInProgress;
+    public static bool SteamMode { get; private set; }
+
+    public static void SetSteamMode(bool enabled, object screen)
+    {
+        var changed = SteamMode != enabled;
+        SteamMode = enabled;
+        if (enabled) {
+            _discovery?.Stop(); _discovery = null;
+        } else if (changed) OnSubmenuOpenedPrefix(screen);
+    }
 
     public static void Apply(Harmony harmony)
     {
@@ -308,6 +318,13 @@ public static class LanMultiplayerPatcher
 
             var loadingOverlay = (Control)_loadingOverlayField.GetValue(__instance);
             loadingOverlay.Visible = false;
+
+            if (SteamMode) {
+                _discovery?.Stop(); _discovery = null;
+                ((Control)_loadingIndicatorField.GetValue(__instance)).Visible = false;
+                ((Control)_noFriendsLabelField.GetValue(__instance)).Visible = false;
+                return false;
+            }
 
             var buttonContainer = (Control)_buttonContainerField.GetValue(__instance);
 

@@ -54,16 +54,19 @@ public static class ModEntry
             return;
         _applied = true;
 
-        PatchHelper.Log("Initializing STS2Mobile...");
+        PatchHelper.Log("Initializing STS2Mobile... [build=mobile-steam-p2p-v11]");
 
         _harmony = new Harmony("com.sts2mobile");
 
         // Game patches require sts2.dll; if missing, fall through to standalone launcher.
         try
         {
+            // Order all model static dependencies for Mono initialization.
             ModelDbInitPatch.Apply(_harmony);
+            ReleaseMetadataPatches.Apply(_harmony);
             PlatformPatches.Apply(_harmony);
             SettingsPatches.Apply(_harmony);
+            RenderScalePatches.Apply(_harmony);
             UiScalePatches.Apply(_harmony);
             MobileLayoutPatches.Apply(_harmony);
             EventLayoutPatches.Apply(_harmony);
@@ -74,6 +77,7 @@ public static class ModEntry
             EarlyAccessDisclaimerPatches.Apply(_harmony);
             CombatBackgroundPatches.Apply(_harmony);
             LanMultiplayerPatcher.Apply(_harmony);
+            PatchHelper.Log("[SteamMP] Registro adiado ate o jogo estar carregado [steam-p2p-v11]");
             ModLoaderPatches.Apply(_harmony);
             LauncherPatches.Apply(_harmony);
             SaveDiagnosticPatches.Apply(_harmony);

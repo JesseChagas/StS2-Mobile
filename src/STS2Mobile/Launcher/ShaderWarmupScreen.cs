@@ -6,21 +6,22 @@ using System.Linq;
 using System.Threading.Tasks;
 using Godot;
 using STS2Mobile.Launcher.Components;
+using STS2Mobile.Launcher.Design;
 
 namespace STS2Mobile.Launcher;
 
 // Compiles shaders on first launch by collecting materials from resources and scenes,
 // rendering them in a SubViewport, then writing a version marker to skip on future launches.
-public class ShaderWarmupScreen : Control
+public partial class ShaderWarmupScreen : Control
 {
     private const int WarmupVersion = 5;
     private const int BatchSize = 8;
 
-    private TaskCompletionSource<bool> _tcs;
+    private readonly TaskCompletionSource<bool> _tcs = new();
     private float _scale;
-    private Label _statusLabel;
-    private Label _detailLabel;
-    private ProgressBar _progressBar;
+    private StyledLabel _statusLabel;
+    private StyledLabel _detailLabel;
+    private LoadingShell _shell;
 
     public static bool NeedsWarmup()
     {
@@ -57,7 +58,6 @@ public class ShaderWarmupScreen : Control
 
     public Task WaitForCompletion()
     {
-        _tcs = new TaskCompletionSource<bool>();
         return _tcs.Task;
     }
 
@@ -86,30 +86,12 @@ public class ShaderWarmupScreen : Control
     private void BuildUI()
     {
         SetAnchorsPreset(LayoutPreset.FullRect);
-
-        var vpSize = GetViewport()?.GetVisibleRect().Size ?? new Vector2(1920, 1080);
-        _scale = Math.Max(vpSize.X, vpSize.Y) / 960f;
-
-        var bg = new ScreenBackground();
-        AddChild(bg);
-
-        var panel = new StyledPanel(_scale, widthRatio: 0.5f);
-        panel.UpdateSizeFromViewport(vpSize);
-        AddChild(panel);
-
-        _statusLabel = new StyledLabel("Compiling shaders...", _scale, fontSize: 20);
-        panel.Content.AddChild(_statusLabel);
-
-        _progressBar = new StyledProgressBar(_scale);
-        _progressBar.MinValue = 0;
-        _progressBar.MaxValue = 100;
-        _progressBar.Value = 0;
-        _progressBar.ShowPercentage = true;
-        panel.Content.AddChild(_progressBar);
-
-        _detailLabel = new StyledLabel("Enumerating resources...", _scale, fontSize: 12);
-        _detailLabel.Modulate = new Color(0.7f, 0.7f, 0.7f);
-        panel.Content.AddChild(_detailLabel);
+        var size = GetViewport()?.GetVisibleRect().Size ?? new Vector2(1920, 1080);
+        _scale = LauncherView.ScaleFor(size);
+        _shell = new LoadingShell(_scale, "Preparing your first run");
+        AddChild(_shell);
+        _statusLabel = _shell.Status;
+        _detailLabel = _shell.Detail;
     }
 
     private async void RunWarmup()
@@ -118,13 +100,13 @@ public class ShaderWarmupScreen : Control
 
         try
         {
-            _statusLabel.Text = "Scanning for shaders...";
+            _statusLabel.SetCopy("Scanning game resources...");
             await ToSignal(RenderingServer.Singleton, RenderingServer.SignalName.FramePostDraw);
 
             var materials = await CollectMaterialsAsync();
             PatchHelper.Log($"[ShaderWarmup] Collected {materials.Count} materials to warm");
 
-            _statusLabel.Text = "Compiling shaders...";
+            _statusLabel.SetCopy("Optimizing graphics...");
 
             if (materials.Count == 0)
             {
@@ -173,8 +155,8 @@ public class ShaderWarmupScreen : Control
 
                 processed = batchEnd;
                 double pct = 50 + (double)processed / total * 50;
-                _progressBar.Value = pct;
-                _detailLabel.Text = $"Compiling {processed} / {total}";
+                _shell.SetProgress(pct);
+                _detailLabel.SetCopy("Optimizing: {0} / {1}", processed, total);
 
                 await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
                 await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
@@ -185,9 +167,9 @@ public class ShaderWarmupScreen : Control
 
             viewport.QueueFree();
 
-            _progressBar.Value = 100;
-            _statusLabel.Text = "Done!";
-            _detailLabel.Text = $"Compiled {total} shaders in {sw.ElapsedMilliseconds}ms";
+            _shell.SetProgress(100);
+            _statusLabel.SetCopy("Ready.");
+            _detailLabel.SetCopy("Graphics prepared in {0}s", sw.ElapsedMilliseconds / 1000);
             PatchHelper.Log(
                 $"[ShaderWarmup] Completed: {total} materials in {sw.ElapsedMilliseconds}ms"
             );
@@ -231,7 +213,7 @@ public class ShaderWarmupScreen : Control
         PatchHelper.Log(
             $"[ShaderWarmup] Found {materials.Count} materials from loose resource files"
         );
-        _detailLabel.Text = $"Found {materials.Count} materials...";
+        _detailLabel.SetCopy("Resources found: {0}", materials.Count);
         await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
 
         var scenePaths = new List<string>();
@@ -259,8 +241,8 @@ public class ShaderWarmupScreen : Control
 
             if (i % 50 == 0)
             {
-                _detailLabel.Text = $"Scanning scenes... {i} / {scenePaths.Count}";
-                _progressBar.Value = (double)i / scenePaths.Count * 50;
+                _detailLabel.SetCopy("Scanning scenes: {0} / {1}", i, scenePaths.Count);
+                _shell.SetProgress((double)i / scenePaths.Count * 50);
                 await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
             }
         }

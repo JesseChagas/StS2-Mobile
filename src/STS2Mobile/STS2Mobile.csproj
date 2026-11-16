@@ -3,6 +3,7 @@
     <TargetFramework>net9.0</TargetFramework>
     <AssemblyName>STS2Mobile</AssemblyName>
     <EnableDefaultCompileItems>true</EnableDefaultCompileItems>
+    <ImplicitUsings>enable</ImplicitUsings>
   </PropertyGroup>
   <ItemGroup>
     <Reference Include="0Harmony">

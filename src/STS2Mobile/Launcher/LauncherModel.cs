@@ -35,6 +35,7 @@ public class LauncherModel : IDisposable
     // Setting this to true eagerly creates the launch TCS so it exists before the
     // UI is shown (preventing a race between PLAY button and WaitForLaunch).
     private bool _inGameMode;
+    public bool RequiresRestart { get; private set; }
     public bool InGameMode
     {
         get => _inGameMode;
@@ -54,6 +55,7 @@ public class LauncherModel : IDisposable
     public event Action<SessionState> SessionStateChanged;
     public event Action<string> LogReceived;
     public event Action<bool> CodeNeeded;
+    public event Action<AuthNotice> AuthNoticeReceived;
     public event Action<DownloadProgress> DownloadProgressChanged;
     public event Action<string> DownloadLogReceived;
     public event Action DownloadCompleted;
@@ -66,6 +68,40 @@ public class LauncherModel : IDisposable
     {
         _dataDir = dataDir;
         _credentialStore = new SteamCredentialStore(dataDir);
+    }
+
+    public async Task LogoutAsync(bool deleteGame)
+    {
+        var app =
+            GetGodotApp()
+            ?? throw new InvalidOperationException("Android activity is unavailable.");
+        if (_inGameMode)
+            await Task.Run(() => DrainCloudBeforeLogout());
+        if (deleteGame)
+            await Task.Run(() => LogoutData.DeleteDownloadedGame(_dataDir));
+        LogoutData.RemoveAccountFiles(_dataDir);
+        _credentialStore.Clear();
+        SharedSteamConnection.Reset();
+        LauncherPatches.SavedAccountName = null;
+        LauncherPatches.SavedRefreshToken = null;
+        LauncherPatches.CloudSyncEnabled = false;
+        Dispose();
+        _connection?.Dispose();
+        _connection = null;
+        app.Call("restartApp");
+    }
+
+    // Keep the game-assembly dependent type out of standalone bootstrap's JIT path.
+    [System.Runtime.CompilerServices.MethodImpl(
+        System.Runtime.CompilerServices.MethodImplOptions.NoInlining
+    )]
+    private static void DrainCloudBeforeLogout()
+    {
+        var store = SteamKit2CloudSaveStore.Instance;
+        if (store != null && !store.WaitForPendingWrites(30000))
+            throw new IOException(
+                "Cloud upload is still running. Try signing out after it finishes."
+            );
     }
 
     public Task WaitForLaunch()
@@ -111,7 +147,7 @@ public class LauncherModel : IDisposable
 
         try
         {
-            _connection = new SteamConnection(
+            _connection = SharedSteamConnection.Get(
                 _credentialStore.AccountName,
                 _credentialStore.RefreshToken
             );
@@ -137,11 +173,14 @@ public class LauncherModel : IDisposable
         {
             _auth = new SteamAuth();
             _auth.LogMessage += msg => LogReceived?.Invoke(msg);
+            _auth.NoticeReceived += notice => AuthNoticeReceived?.Invoke(notice);
             _auth.CodeProvider = async (wasIncorrect) =>
             {
                 AwaitingCode = true;
+                _codeTcs = new TaskCompletionSource<string>(
+                    TaskCreationOptions.RunContinuationsAsynchronously
+                );
                 CodeNeeded?.Invoke(wasIncorrect);
-                _codeTcs = new TaskCompletionSource<string>();
                 var code = await _codeTcs.Task;
 
                 if (_auth.NeedsReconnectForAuth)
@@ -165,7 +204,7 @@ public class LauncherModel : IDisposable
             _auth.Dispose();
             _auth = null;
 
-            _connection = new SteamConnection(result.AccountName, result.RefreshToken);
+            _connection = await Task.Run(() => SharedSteamConnection.UpdateCredentials(result.AccountName, result.RefreshToken));
             await VerifyOwnershipAsync();
         }
         catch (Exception ex)
@@ -191,7 +230,7 @@ public class LauncherModel : IDisposable
             return;
         }
 
-        _connection ??= new SteamConnection(
+        _connection ??= SharedSteamConnection.Get(
             _credentialStore.AccountName,
             _credentialStore.RefreshToken
         );
@@ -199,6 +238,7 @@ public class LauncherModel : IDisposable
         SetState(SessionState.Connecting);
         try
         {
+            await _connection.GetAuthenticatedClientAsync(CancellationToken.None);
             await _connection.Apps.PICSGetAccessTokens(2868840, null);
             ConnectionResolved = true;
             OfflineMode = false;
@@ -229,6 +269,9 @@ public class LauncherModel : IDisposable
         try
         {
             await Task.Run(() => _downloader.DownloadAsync(_downloadCts.Token));
+            // sts2.dll/PCK may already be loaded before the launcher is shown.
+            // Replacing files on disk cannot update the running assembly.
+            RequiresRestart = true;
             DownloadCompleted?.Invoke();
         }
         catch (OperationCanceledException)
@@ -284,9 +327,10 @@ public class LauncherModel : IDisposable
         {
             LauncherPatches.SavedAccountName = _credentialStore.AccountName;
             LauncherPatches.SavedRefreshToken = _credentialStore.RefreshToken;
+            SharedSteamConnection.KeepForGame(_credentialStore.AccountName, _credentialStore.RefreshToken);
         }
 
-        if (_launchTcs != null)
+        if (_launchTcs != null && !RequiresRestart)
             _launchTcs.TrySetResult(true);
         else
         {
@@ -311,6 +355,7 @@ public class LauncherModel : IDisposable
         SetState(SessionState.VerifyingOwnership);
 
         var verifier = CreateOwnershipVerifier();
+        await _connection.GetAuthenticatedClientAsync(CancellationToken.None);
         bool owns = await verifier.VerifyAsync(_connection);
 
         if (owns)

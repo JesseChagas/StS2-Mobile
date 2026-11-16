@@ -1,169 +1,121 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Reflection;
-using System.Runtime.CompilerServices;
+using System.Reflection.Emit;
 using HarmonyLib;
 using MegaCrit.Sts2.Core.Models;
 
 namespace STS2Mobile.Patches;
 
-// Replaces ModelDb.Init() with a two-phase initialization to avoid circular dependency
-// crashes. Phase 1 pre-populates the registry with uninitialized objects so cross-type
-// references resolve during construction. Phase 2 runs the actual constructors.
+// Mono may execute beforefieldinit type initializers earlier than CoreCLR.
+// Order canonical models by the ModelDb references in their static initializers;
+// keep the original constructors, registration, duplicate checks and failures.
 public static class ModelDbInitPatch
 {
-    private static bool _suppressContains = false;
+    private static readonly Dictionary<short, OpCode> Opcodes = typeof(OpCodes)
+        .GetFields(BindingFlags.Public | BindingFlags.Static)
+        .Where(field => field.FieldType == typeof(OpCode))
+        .Select(field => (OpCode)field.GetValue(null))
+        .ToDictionary(opcode => opcode.Value);
 
     public static void Apply(Harmony harmony)
     {
-        PatchHelper.Patch(
-            harmony,
-            typeof(ModelDb),
-            "Init",
-            prefix: PatchHelper.Method(typeof(ModelDbInitPatch), nameof(InitPrefix))
-        );
+        PatchHelper.PatchCritical(harmony, typeof(ModelDb), "Init",
+            prefix: PatchHelper.Method(typeof(ModelDbInitPatch), nameof(InitPrefix)));
     }
 
-    public static bool ContainsPrefix(ref bool __result)
+    public static void InitPrefix(ref Type[] __0)
     {
-        if (_suppressContains)
-        {
-            __result = false;
-            return false;
-        }
-        return true;
+        __0 = OrderForInitialization(__0 ?? ModelDb.AllAbstractModelSubtypes);
+        PatchHelper.Log($"[ModelDb] Static dependency order applied: {__0.Length} models; original constructors preserved [v4]");
     }
 
-    public static bool InitPrefix()
+    public static Type[] OrderForInitialization(Type[] types)
     {
-        PatchHelper.Log("Running patched ModelDb.Init()");
+        ArgumentNullException.ThrowIfNull(types);
+        var available = new HashSet<Type>(types);
+        var states = new Dictionary<Type, int>();
+        var ordered = new List<Type>(types.Length);
+        var chain = new List<Type>();
 
-        var modelDbType = typeof(ModelDb);
-
-        var allSubtypesProp = modelDbType.GetProperty(
-            "AllAbstractModelSubtypes",
-            BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static
-        );
-        var types = (Type[])allSubtypesProp.GetValue(null);
-
-        var getIdMethod = modelDbType.GetMethod(
-            "GetId",
-            BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static,
-            null,
-            new[] { typeof(Type) },
-            null
-        );
-
-        var contentByIdField = modelDbType.GetField(
-            "_contentById",
-            BindingFlags.NonPublic | BindingFlags.Static
-        );
-        var contentById = contentByIdField.GetValue(null);
-
-        var dictType = contentById.GetType();
-        var setItemMethod = dictType.GetMethod("set_Item");
-
-        // Phase 1: Pre-populate dictionary with uninitialized objects
-        PatchHelper.Log(
-            $"Phase 1: Pre-registering {types.Length} types with uninitialized objects"
-        );
-
-        var typeObjects = new Dictionary<Type, object>();
-        int preRegCount = 0;
-
-        for (int i = 0; i < types.Length; i++)
+        void Visit(Type type)
         {
-            try
+            if (states.TryGetValue(type, out int state))
             {
-                var type = types[i];
-                var id = getIdMethod.Invoke(null, new object[] { type });
-                var model = RuntimeHelpers.GetUninitializedObject(type);
-                setItemMethod.Invoke(contentById, new[] { id, model });
-                typeObjects[type] = model;
-                preRegCount++;
+                if (state == 1)
+                    throw new InvalidOperationException("Model static dependency cycle: "
+                        + string.Join(" -> ", chain.Select(item => item.Name).Append(type.Name)));
+                return;
             }
-            catch (Exception ex)
-            {
-                PatchHelper.Log($"Phase 1 - Failed to pre-register {types[i].Name}: {ex.Message}");
-            }
+            states[type] = 1;
+            chain.Add(type);
+            var dependencies = GetStaticDependencies(type);
+            // Stable order follows the caller's model list, not hash iteration.
+            foreach (var candidate in types)
+                if (dependencies.Contains(candidate) && available.Contains(candidate))
+                    Visit(candidate);
+            chain.RemoveAt(chain.Count - 1);
+            states[type] = 2;
+            ordered.Add(type);
         }
-
-        PatchHelper.Log($"Phase 1 complete: {preRegCount} types pre-registered");
-
-        // Temporarily suppress Contains() during Phase 2 so constructors don't
-        // short-circuit when they check if their type is already registered.
-        var harmony = new Harmony("com.sts2mobile.modeldb");
-        var containsMethod = modelDbType.GetMethod(
-            "Contains",
-            BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static,
-            null,
-            new[] { typeof(Type) },
-            null
-        );
-        var containsPrefix = typeof(ModelDbInitPatch).GetMethod(
-            nameof(ContainsPrefix),
-            BindingFlags.Public | BindingFlags.Static
-        );
-        harmony.Patch(containsMethod, new HarmonyMethod(containsPrefix));
-
-        // Phase 2: Run constructors on pre-allocated objects
-        PatchHelper.Log("Phase 2: Running constructors");
-
-        _suppressContains = true;
-
-        int successCount = 0;
-        var failed = new List<Type>();
 
         foreach (var type in types)
+            Visit(type);
+        return ordered.ToArray();
+    }
+
+    public static HashSet<Type> GetStaticDependencies(Type type)
+    {
+        var dependencies = new HashSet<Type>();
+        var visited = new HashSet<MethodBase>();
+        for (var current = type; current != null && current != typeof(object); current = current.BaseType)
+            Scan(current.TypeInitializer, dependencies, visited);
+        return dependencies;
+    }
+
+    private static void Scan(MethodBase method, HashSet<Type> dependencies, HashSet<MethodBase> visited)
+    {
+        if (method == null || !visited.Add(method))
+            return;
+        var bytes = method.GetMethodBody()?.GetILAsByteArray();
+        if (bytes == null)
+            return;
+        for (int offset = 0; offset < bytes.Length;)
         {
-            if (!typeObjects.ContainsKey(type))
-                continue;
-
-            try
+            short value = bytes[offset++];
+            if (value == 0xfe)
+                value = unchecked((short)(0xfe00 | bytes[offset++]));
+            if (!Opcodes.TryGetValue(value, out var opcode))
+                throw new InvalidOperationException($"Unknown IL opcode in {method}");
+            int size = opcode.OperandType switch
             {
-                RuntimeHelpers.RunClassConstructor(type.TypeHandle);
-
-                var ctor = type.GetConstructor(
-                    BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance,
-                    null,
-                    Type.EmptyTypes,
-                    null
-                );
-                if (ctor != null)
+                OperandType.InlineNone => 0,
+                OperandType.ShortInlineBrTarget or OperandType.ShortInlineI or OperandType.ShortInlineVar => 1,
+                OperandType.InlineVar => 2,
+                OperandType.InlineI8 or OperandType.InlineR => 8,
+                OperandType.InlineSwitch => 4 + 4 * BitConverter.ToInt32(bytes, offset),
+                _ => 4,
+            };
+            if ((opcode == OpCodes.Call || opcode == OpCodes.Callvirt || opcode == OpCodes.Newobj)
+                && opcode.OperandType == OperandType.InlineMethod)
+            {
+                var called = method.Module.ResolveMethod(BitConverter.ToInt32(bytes, offset),
+                    method.DeclaringType?.GetGenericArguments(),
+                    method.IsGenericMethod ? method.GetGenericArguments() : null);
+                if (called.DeclaringType == typeof(ModelDb))
                 {
-                    ctor.Invoke(typeObjects[type], null);
+                    // GetId<T>() computes an ID without reading the registry.
+                    // Only lookups that return a model require prior registration.
+                    if (called.IsGenericMethod && called is MethodInfo lookup
+                        && typeof(AbstractModel).IsAssignableFrom(lookup.ReturnType))
+                        foreach (var argument in called.GetGenericArguments())
+                            if (!argument.ContainsGenericParameters && !argument.IsAbstract
+                                && typeof(AbstractModel).IsAssignableFrom(argument))
+                                dependencies.Add(argument);
                 }
-
-                successCount++;
             }
-            catch (Exception ex)
-            {
-                failed.Add(type);
-                var inner = ex;
-                while (inner.InnerException != null)
-                    inner = inner.InnerException;
-                PatchHelper.Log(
-                    $"Phase 2 - Failed {type.Name}: {inner.GetType().Name}: {inner.Message}"
-                );
-            }
+            offset += size;
         }
-
-        _suppressContains = false;
-        harmony.Unpatch(containsMethod, containsPrefix);
-
-        if (failed.Count > 0)
-        {
-            PatchHelper.Log(
-                $"WARNING: {failed.Count}/{types.Length} types had constructor errors:"
-            );
-            foreach (var type in failed)
-                PatchHelper.Log($"  - {type.FullName}");
-        }
-        else
-        {
-            PatchHelper.Log($"All {successCount} model types registered successfully");
-        }
-
-        return false;
     }
 }

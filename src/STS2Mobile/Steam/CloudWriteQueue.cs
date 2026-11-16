@@ -12,7 +12,16 @@ public class CloudWriteQueue : IDisposable
     private readonly BlockingCollection<Action> _queue = new();
     private readonly Thread _thread;
 
-    public int Count => _queue.Count;
+    private int _pending;
+    public int Count => Volatile.Read(ref _pending);
+
+    public bool WaitForIdle(int timeoutMs)
+    {
+        var deadline = Environment.TickCount64 + timeoutMs;
+        while (Count > 0 && Environment.TickCount64 < deadline)
+            Thread.Sleep(25);
+        return Count == 0;
+    }
 
     public CloudWriteQueue()
     {
@@ -22,26 +31,24 @@ public class CloudWriteQueue : IDisposable
 
     public void Enqueue(Action action)
     {
-        _queue.Add(action);
+        Interlocked.Increment(ref _pending);
+        try
+        {
+            _queue.Add(action);
+        }
+        catch
+        {
+            Interlocked.Decrement(ref _pending);
+            throw;
+        }
     }
 
     // Waits for pending work to complete, up to timeoutMs. Does not break the
     // queue — new work can still be enqueued after flush returns.
     public void Flush(int timeoutMs = 5000)
     {
-        if (_queue.Count == 0)
-            return;
-
-        PatchHelper.Log($"[Cloud] Flushing {_queue.Count} pending writes...");
-        var deadline = Environment.TickCount64 + timeoutMs;
-
-        while (_queue.Count > 0 && Environment.TickCount64 < deadline)
-            Thread.Sleep(100);
-
-        if (_queue.Count > 0)
-            PatchHelper.Log($"[Cloud] Flush timed out, {_queue.Count} writes remaining");
-        else
-            PatchHelper.Log("[Cloud] Flush completed");
+        if (!WaitForIdle(timeoutMs))
+            PatchHelper.Log($"[Cloud] Flush timed out, {Count} writes remaining");
     }
 
     public void Dispose()
@@ -63,6 +70,10 @@ public class CloudWriteQueue : IDisposable
             catch (Exception ex)
             {
                 PatchHelper.Log($"[Cloud] Background write failed: {ex.Message}");
+            }
+            finally
+            {
+                Interlocked.Decrement(ref _pending);
             }
         }
     }

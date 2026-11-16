@@ -1,0 +1,32 @@
+{
+  "revision": "steam-p2p-v11",
+  "sha256": "bf05867a157e3065ba80f1438868b060f0804eb1f3e8f0d1007bdd25dad9f4bb",
+  "game_reference_sha256": "62ecbe91093e1fa862de4329aac865209dcb297804caf0f0520d92d8c0b4a9c3",
+  "godotsharp": "4.5.1",
+  "harmony": "2.4.2",
+  "steamkit2": "3.4.0",
+  "android_playtest_performed": false,
+  "full_gameplay_test_performed": false,
+  "dependencies": [
+    {
+      "name": "SteamKit2.dll",
+      "sha256": "70bfc2635b0082c63605d7980aad758992a75cc3f14d6b4a0375e339acd9a4a1"
+    },
+    {
+      "name": "protobuf-net.dll",
+      "sha256": "78d95efd88bce208a2aa412f193ed534e4b6337f8c15ff9171b8696946200edf"
+    },
+    {
+      "name": "protobuf-net.Core.dll",
+      "sha256": "18f2f6976f101c804d7c7314739fefce4dafa6d63ff4c3986e45d59967bd2777"
+    },
+    {
+      "name": "System.IO.Hashing.dll",
+      "sha256": "d9028e7a6464890fd941ada4a01ebb4e6dde306965af307987546852b4af5c0b"
+    },
+    {
+      "name": "ZstdSharp.dll",
+      "sha256": "177f541b9bba3cfe89d3fe9565ea9f78285ef8499d689dcfd5de0018b6fa43e5"
+    }
+  ]
+}

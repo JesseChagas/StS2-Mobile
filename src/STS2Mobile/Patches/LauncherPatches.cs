@@ -6,6 +6,7 @@ using HarmonyLib;
 using MegaCrit.Sts2.Core.Nodes;
 using MegaCrit.Sts2.Core.Saves;
 using STS2Mobile.Launcher;
+using STS2Mobile.Launcher.Design;
 using STS2Mobile.Steam;
 
 namespace STS2Mobile.Patches;
@@ -21,6 +22,8 @@ public static class LauncherPatches
 
     public static void Apply(Harmony harmony)
     {
+        CloudSyncCoordinator.CloudDataApplied += _ =>
+            CloudPresentation.MarkPulled(OS.GetDataDir(), SavedAccountName);
         PatchHelper.PatchCritical(
             harmony,
             typeof(NGame),
@@ -112,6 +115,7 @@ public static class LauncherPatches
 
         await launcher.WaitForLaunch();
         PatchHelper.Log("User launched game, proceeding to startup...");
+        ReleaseMetadataPatches.PrepareForGame();
 
         var instanceField = typeof(SaveManager).GetField(
             "_instance",
@@ -134,19 +138,63 @@ public static class LauncherPatches
             warmup.QueueFree();
         }
 
-        SaveManager.Instance.InitSettingsData();
-
-        var gameStartup = game.GetType()
-            .GetMethod("GameStartup", BindingFlags.NonPublic | BindingFlags.Instance);
-
+        var loading = new Control { ZIndex = 100 };
+        loading.SetAnchorsPreset(Control.LayoutPreset.FullRect);
+        gameNode.AddChild(loading);
+        loading.AddChild(
+            new LoadingShell(
+                LauncherView.ScaleFor(gameNode.GetViewport().GetVisibleRect().Size),
+                "Loading your game",
+                true
+            )
+        );
+        await gameNode.ToSignal(
+            RenderingServer.Singleton,
+            RenderingServer.SignalName.FramePostDraw
+        );
         try
         {
+            SaveManager.Instance.InitSettingsData();
+
+            var gameStartup =
+                game.GetType()
+                    .GetMethod("GameStartup", BindingFlags.NonPublic | BindingFlags.Instance)
+                ?? throw new MissingMethodException(game.GetType().FullName, "GameStartup");
+
+            PatchHelper.Log("[Startup] Starting original GameStartup");
             await (Task)gameStartup.Invoke(game, null);
+            PatchHelper.Log("[Startup] GameStartup completed");
+            STS2Mobile.Graphics.MobileRenderScale.Attach(gameNode.GetTree().Root);
+            // PlatformUtil's static constructor creates a native Steam callback.
+            // Do not touch those types during early Mono/launcher bootstrap.
+            try { SteamMultiplayerPatches.Apply(new Harmony("com.sts2mobile.steam")); }
+            catch (Exception e) { PatchHelper.Log("[SteamMP] Integração indisponível: " + e.Message); }
         }
-        catch (TargetInvocationException ex)
+        catch (Exception ex)
         {
-            PatchHelper.Log($"Game startup failed: {ex.InnerException?.Message}");
-            throw ex.InnerException ?? ex;
+            // Exceptions from an awaited startup Task are not wrapped in
+            // TargetInvocationException. Log and display both failure forms.
+            var cause = ex is TargetInvocationException invocation
+                ? invocation.InnerException ?? invocation
+                : ex;
+            PatchHelper.Log($"[Startup] Game startup failed: {cause}");
+
+            var dialog = new AcceptDialog
+            {
+                Title = "Game startup failed",
+                DialogText =
+                    "The game could not start.\n"
+                    + $"{cause.GetType().Name}: {cause.Message}\n\n"
+                    + "Restart the app before trying again. See the log for details.",
+            };
+            gameNode.AddChild(dialog);
+            dialog.PopupCentered(new Vector2I(800, 360));
+            throw;
+        }
+        finally
+        {
+            if (GodotObject.IsInstanceValid(loading))
+                loading.QueueFree();
         }
     }
 }

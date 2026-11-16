@@ -1,0 +1,10 @@
+<Project Sdk="Godot.NET.Sdk/4.5.1">
+ <PropertyGroup><TargetFramework>net9.0</TargetFramework><EnableDynamicLoading>true</EnableDynamicLoading><ImplicitUsings>enable</ImplicitUsings></PropertyGroup>
+ <ItemGroup>
+  <ProjectReference Include="../../src/STS2Mobile/STS2Mobile.csproj" />
+  <ProjectReference Include="../SteamTestSentry/SteamTestSentry.csproj" />
+  <Reference Include="sts2"><HintPath>../../upstream/godot-export/.godot/mono/publish/arm64/sts2.dll</HintPath></Reference>
+  <Reference Include="0Harmony"><HintPath>../../upstream/godot-export/.godot/mono/publish/arm64/0Harmony.dll</HintPath></Reference>
+  <PackageReference Include="Steamworks.NET" Version="2024.8.0" />
+ </ItemGroup>
+</Project>

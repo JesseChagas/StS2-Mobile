@@ -1,0 +1,32 @@
+{
+  "prototype": "0.4",
+  "c_abi": 4,
+  "gns_commit": "d534c19aa760df3fb75fd20db13ba1932b8a5463",
+  "protobuf": "3.21.12",
+  "windows_toolchain": "llvm-mingw 20261104 UCRT x64",
+  "windows_crypto": "Windows BCrypt + reference Ed25519/X25519",
+  "android_ndk": "r27d",
+  "android_api": 26,
+  "android_page_alignment": 16384,
+  "android_crypto": "OpenSSL 3.5.9 + reference Ed25519/X25519",
+  "linux_crypto": "system OpenSSL 3; statically linked protobuf 3.21.12",
+  "relay_sdr_implemented": false,
+  "binaries": [
+    {
+      "path": "native/steam-p2p/arm64-v8a/libsts2_gns.so",
+      "sha256": "c8e0d143b967f2510f8efd56c2d5e9f1fa6032c06dc25799b1ef6ebc3d7b8f5f",
+      "bytes": 6862560
+    },
+    {
+      "path": "runtimes/linux-x64/native/libsts2_gns.so",
+      "sha256": "cda64e8c7c677c0c71408168fb7f8d2c6a0f33370fc756dc551b31f956c605ba",
+      "bytes": 2397296
+    }
+  ],
+  "transport_revision": 7,
+  "android_interface_discovery": "bionic getifaddrs, API 26; Android no longer excluded from POSIX enumeration",
+  "android_playtest_performed": false,
+  "source": "native/steam-p2p/source",
+  "source_patch": "native/steam-p2p/source/android-interfaces.patch",
+  "graceful_close": "Close connection, pump and forward pending custom signals for 200 ms, then destroy native context."
+}

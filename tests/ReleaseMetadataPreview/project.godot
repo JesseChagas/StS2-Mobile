@@ -1,0 +1,8 @@
+config_version=5
+[application]
+config/name="STS2ReleaseMetadataTest"
+run/main_scene="res://Preview.tscn"
+[dotnet]
+project/assembly_name="ReleaseMetadataPreview"
+[rendering]
+renderer/rendering_method="gl_compatibility"

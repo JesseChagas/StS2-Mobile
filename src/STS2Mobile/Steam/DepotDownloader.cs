@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -29,6 +29,9 @@ public class DepotDownloader : IDisposable
     private const uint AppId = 2868840;
     private const int MaxRetries = 5;
     private const int MaxConcurrentDownloads = 8;
+
+    // Steam branch to download, chosen in the launcher UI (see BranchSettings).
+    private readonly string _branch = BranchSettings.Load();
 
     private readonly SteamConnection _connection;
     private readonly string _gameDir;
@@ -168,6 +171,7 @@ public class DepotDownloader : IDisposable
 
             // Remove Sentry plugin references (no android.arm64 build exists).
             PatchGamePck(Path.Combine(_gameDir, "SlayTheSpire2.pck"));
+            InstalledReleaseMetadata.RecordVerifiedBranch(Path.GetDirectoryName(_gameDir), _branch);
         }
         finally
         {
@@ -180,6 +184,7 @@ public class DepotDownloader : IDisposable
     )
     {
         var result = new List<(uint, ulong)>();
+        Log($"Using Steam branch '{_branch}'");
 
         foreach (var depot in depotSection.Children)
         {
@@ -225,9 +230,12 @@ public class DepotDownloader : IDisposable
                     continue;
             }
 
-            var gidNode = manifests["public"]["gid"];
+            var gidNode = manifests[_branch]["gid"];
             if (gidNode == KeyValue.Invalid || gidNode.Value == null)
+            {
+                Log($"Depot {depotId} has no manifest on branch '{_branch}', skipping");
                 continue;
+            }
 
             if (!ulong.TryParse(gidNode.Value, out var manifestId))
                 continue;
@@ -306,7 +314,7 @@ public class DepotDownloader : IDisposable
             depotId,
             AppId,
             manifestId,
-            "public"
+            _branch
         );
         if (code == 0)
             throw new Exception(

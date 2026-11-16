@@ -1,33 +1,44 @@
+using System.Collections.Generic;
 using Godot;
+using STS2Mobile.Launcher.Design;
 
 namespace STS2Mobile.Launcher.Components;
 
-public class LogView : RichTextLabel
+public partial class LogView : RichTextLabel
 {
+    private readonly float _scale;
+    private readonly Queue<string> _lines = new();
+
     public LogView(float scale)
     {
-        CustomMinimumSize = new Vector2(0, (int)(120 * scale));
+        _scale = scale;
+        CustomMinimumSize = new Vector2(0, (int)(100 * scale));
         ScrollFollowing = true;
-        BbcodeEnabled = true;
+        BbcodeEnabled = false;
         AddThemeFontSizeOverride("normal_font_size", (int)(11 * scale));
-        AddThemeColorOverride("default_color", new Color(0.6f, 0.6f, 0.65f));
-
-        var bg = new StyleBoxFlat();
-        bg.BgColor = new Color(0.05f, 0.05f, 0.07f);
-        bg.SetCornerRadiusAll((int)(4 * scale));
-        bg.ContentMarginLeft = (int)(8 * scale);
-        bg.ContentMarginRight = (int)(8 * scale);
-        bg.ContentMarginTop = (int)(4 * scale);
-        bg.ContentMarginBottom = (int)(4 * scale);
-        AddThemeStyleboxOverride("normal", bg);
+        Refresh();
+        LauncherPreferences.Changed += Refresh;
+        TreeExiting += () => LauncherPreferences.Changed -= Refresh;
     }
 
-    public void AppendLog(string msg) => AddText(msg + "\n");
-
-    public void AppendColoredLog(string msg, Color color)
+    private void Refresh()
     {
-        PushColor(color);
-        AddText(msg + "\n");
-        Pop();
+        AddThemeColorOverride("default_color", LauncherDesign.Muted);
+        AddThemeStyleboxOverride(
+            "normal",
+            LauncherDesign.Box(LauncherDesign.Background, _scale, 4, false, 10)
+        );
     }
+
+    public void AppendLog(string msg)
+    {
+        if (string.IsNullOrWhiteSpace(msg))
+            return;
+        _lines.Enqueue(msg.Length > 500 ? msg[..500] : msg);
+        while (_lines.Count > 80)
+            _lines.Dequeue();
+        Text = string.Join("\n", _lines);
+    }
+
+    public void AppendColoredLog(string msg, Color color) => AppendLog(msg);
 }

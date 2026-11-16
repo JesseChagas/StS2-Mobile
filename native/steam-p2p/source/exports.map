@@ -1,0 +1,4 @@
+{
+  global: sts_gns_*;
+  local: *;
+};

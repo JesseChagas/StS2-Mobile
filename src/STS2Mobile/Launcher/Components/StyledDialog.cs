@@ -1,67 +1,68 @@
 using System;
 using Godot;
+using STS2Mobile.Launcher.Design;
 
 namespace STS2Mobile.Launcher.Components;
 
-// Modal confirmation dialog built from styled launcher components.
-// Renders as a dimmed overlay with a centered panel, message, and OK/Cancel buttons.
-public class StyledDialog : ColorRect
+public partial class StyledDialog : ColorRect
 {
     public event Action Confirmed;
     public event Action Cancelled;
+    public VBoxContainer Content { get; private set; }
+    public HBoxContainer Buttons { get; private set; }
 
-    public StyledDialog(string message, float scale)
+    public StyledDialog(string message, float scale, bool informational = false)
     {
+        ZIndex = 200;
         SetAnchorsPreset(LayoutPreset.FullRect);
-        Color = new Color(0, 0, 0, 0.6f);
-
+        Color = new Color(0, 0, 0, 0.65f);
+        MouseFilter = MouseFilterEnum.Stop;
         var center = new CenterContainer();
         center.SetAnchorsPreset(LayoutPreset.FullRect);
-
-        var dialogBox = new PanelContainer();
-        var boxStyle = new StyleBoxFlat();
-        boxStyle.BgColor = new Color(0.15f, 0.15f, 0.18f);
-        boxStyle.SetCornerRadiusAll((int)(8 * scale));
-        boxStyle.SetContentMarginAll((int)(24 * scale));
-        dialogBox.AddThemeStyleboxOverride("panel", boxStyle);
-
-        var vbox = new VBoxContainer();
-        vbox.AddThemeConstantOverride("separation", (int)(16 * scale));
-        dialogBox.AddChild(vbox);
-
-        var label = new StyledLabel(message, scale, fontSize: 16);
-        label.AutowrapMode = TextServer.AutowrapMode.WordSmart;
-        label.CustomMinimumSize = new Vector2((int)(300 * scale), 0);
-        label.HorizontalAlignment = HorizontalAlignment.Center;
-        vbox.AddChild(label);
-
-        var buttonRow = new HBoxContainer();
-        buttonRow.AddThemeConstantOverride("separation", (int)(12 * scale));
-        buttonRow.Alignment = BoxContainer.AlignmentMode.Center;
-        vbox.AddChild(buttonRow);
-
-        var cancelButton = new StyledButton("Cancel", scale, fontSize: 14, height: 44);
-        cancelButton.CustomMinimumSize = new Vector2(
-            (int)(120 * scale),
-            cancelButton.CustomMinimumSize.Y
+        AddChild(center);
+        var box = new PanelContainer();
+        box.AddThemeStyleboxOverride(
+            "panel",
+            LauncherDesign.Box(LauncherDesign.Surface, scale, 10, true, 24)
         );
-        cancelButton.Pressed += () =>
+        center.AddChild(box);
+        var content = new VBoxContainer();
+        Content = content;
+        content.AddThemeConstantOverride("separation", (int)(20 * scale));
+        box.AddChild(content);
+        var label = new StyledLabel(message, scale, 16)
         {
-            QueueFree();
-            Cancelled?.Invoke();
+            AutowrapMode = TextServer.AutowrapMode.WordSmart,
+            CustomMinimumSize = new Vector2(420 * scale, 0),
         };
-        buttonRow.AddChild(cancelButton);
-
-        var okButton = new StyledButton("OK", scale, fontSize: 14, height: 44);
-        okButton.CustomMinimumSize = new Vector2((int)(120 * scale), okButton.CustomMinimumSize.Y);
-        okButton.Pressed += () =>
+        content.AddChild(label);
+        var row = new HBoxContainer();
+        Buttons = row;
+        row.AddThemeConstantOverride("separation", (int)(12 * scale));
+        content.AddChild(row);
+        if (!informational)
+        {
+            var cancel = new StyledButton("Cancel", scale)
+            {
+                SizeFlagsHorizontal = SizeFlags.ExpandFill,
+            };
+            cancel.Pressed += () =>
+            {
+                QueueFree();
+                Cancelled?.Invoke();
+            };
+            row.AddChild(cancel);
+        }
+        var confirm = new StyledButton(informational ? "Close" : "Continue", scale)
+        {
+            SizeFlagsHorizontal = SizeFlags.ExpandFill,
+        };
+        confirm.SetPrimary(true);
+        confirm.Pressed += () =>
         {
             QueueFree();
             Confirmed?.Invoke();
         };
-        buttonRow.AddChild(okButton);
-
-        center.AddChild(dialogBox);
-        AddChild(center);
+        row.AddChild(confirm);
     }
 }

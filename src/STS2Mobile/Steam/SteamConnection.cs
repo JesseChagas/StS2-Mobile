@@ -36,7 +36,8 @@ public class SteamConnection : IDisposable
     private const int ConnectTimeoutMs = 15_000;
 
     private readonly string _accountName;
-    private readonly string _refreshToken;
+    internal Sts2.SteamClientPrototype.SteamFriendDirectory FriendDirectory { get; }
+    private string _refreshToken;
     private readonly int _defaultIdleTimeoutMs;
 
     private readonly SteamClient _client;
@@ -55,9 +56,17 @@ public class SteamConnection : IDisposable
     private Timer _idleTimer;
     private int _backoffMs;
     private Exception _connectError;
+    private SteamLoginRequiredException _authenticationFailure;
     private volatile int _idleSuspendCount;
+    private bool _shared;
+    private volatile bool _disposed;
+    private TaskCompletionSource _friendsReady = NewFriendsCompletion();
+    private static TaskCompletionSource NewFriendsCompletion() => new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private volatile bool _loggedOn;
+    public bool IsAuthenticated => !_disposed && _loggedOn && State == ConnectionState.Connected && _client.IsConnected && _client.SteamID != null;
 
-    public ConnectionState State { get; private set; } = ConnectionState.Idle;
+    private volatile ConnectionState _state = ConnectionState.Idle;
+    public ConnectionState State { get => _state; private set => _state = value; }
     public ulong AppAccessToken { get; set; }
 
     public SteamClient Client => _client;
@@ -87,8 +96,10 @@ public class SteamConnection : IDisposable
         _refreshToken = refreshToken;
         _defaultIdleTimeoutMs = idleTimeoutMs;
 
-        var config = SteamConfiguration.Create(b => b.WithProtocolTypes(ProtocolTypes.WebSocket));
+        var config = SteamConfiguration.Create(b => b.WithProtocolTypes(ProtocolTypes.WebSocket)
+            .WithDefaultPersonaStateFlags(SteamKitLobbyGateway.RequestedFlags));
         _client = new SteamClient(config);
+        FriendDirectory = new Sts2.SteamClientPrototype.SteamFriendDirectory(_client);
         _callbackManager = new CallbackManager(_client);
         _steamUser = _client.GetHandler<SteamUser>();
         _steamApps = _client.GetHandler<SteamApps>();
@@ -98,18 +109,18 @@ public class SteamConnection : IDisposable
 
         _callbackManager.Subscribe<SteamClient.ConnectedCallback>(_ =>
         {
-            _steamUser.LogOn(
-                new SteamUser.LogOnDetails
-                {
-                    Username = _accountName,
-                    AccessToken = _refreshToken,
-                    ShouldRememberPassword = true,
-                }
-            );
+            if (_disposed) return;
+            _steamUser.LogOn(SteamSessionPolicy.CreateLauncherLogOn(_accountName, _refreshToken));
         });
 
-        _callbackManager.Subscribe<SteamClient.DisconnectedCallback>(_ =>
+        _callbackManager.Subscribe<SteamClient.DisconnectedCallback>(cb =>
         {
+            if (_disposed || cb.UserInitiated || _client.IsConnected) return;
+            _loggedOn = false;
+            if (State == ConnectionState.Connecting) {
+                _connectError ??= new IOException("A conexão Steam terminou durante o login.");
+                _connectedGate.Set();
+            }
             if (State == ConnectionState.Connected)
             {
                 PatchHelper.Log("[Connection] Dropped unexpectedly");
@@ -119,14 +130,64 @@ public class SteamConnection : IDisposable
 
         _callbackManager.Subscribe<SteamUser.LoggedOnCallback>(cb =>
         {
-            if (cb.Result == EResult.OK)
+            if (_disposed) return;
+            if (cb.Result == EResult.OK) {
+                _loggedOn = true;
                 _connectedGate.Set();
+            }
             else
             {
-                _connectError = new InvalidOperationException($"Login failed: {cb.Result}");
+                _loggedOn = false;
+                _connectError = cb.Result is EResult.AccessDenied or EResult.InvalidPassword or EResult.Expired or EResult.Revoked
+                    ? new SteamLoginRequiredException(cb.Result)
+                    : new InvalidOperationException($"Login failed: {cb.Result}");
                 _connectedGate.Set();
             }
         });
+        _callbackManager.Subscribe<SteamUser.LoggedOffCallback>(cb => {
+            if (_disposed) return;
+            var wasLoggedOn = _loggedOn;
+            _loggedOn = false;
+            // Teardown already invalidates the login before sending LogOff.
+            // A queued acknowledgement of that old login must not fail a retry.
+            if (!wasLoggedOn) return;
+            _connectError = cb.Result is EResult.AccessDenied or EResult.InvalidPassword or EResult.Expired or EResult.Revoked
+                ? new SteamLoginRequiredException(cb.Result)
+                : new IOException("A Steam encerrou a sessão autenticada: " + cb.Result);
+            if (_connectError is SteamLoginRequiredException rejected) _authenticationFailure = rejected;
+            if (State == ConnectionState.Connecting) _connectedGate.Set();
+            else if (State == ConnectionState.Connected) EnterBackoff();
+        });
+        _callbackManager.Subscribe<SteamFriends.FriendsListCallback>(_ => _friendsReady.TrySetResult());
+    }
+
+    internal void MarkShared() => _shared = true;
+    internal void UpdateRefreshToken(string token)
+    {
+        lock (_stateLock) {
+            _refreshToken = token;
+            _authenticationFailure = null;
+            _backoffMs = 0;
+            if (State == ConnectionState.Backoff) State = ConnectionState.Idle;
+        }
+    }
+    internal IDisposable Subscribe<T>(Action<T> callback) where T : CallbackMsg => _callbackManager.Subscribe(callback);
+    internal Task WaitForFriendsAsync(CancellationToken token) => _friendsReady.Task.WaitAsync(TimeSpan.FromSeconds(15), token);
+    internal async Task<SteamClient> GetAuthenticatedClientAsync(CancellationToken token)
+    {
+        await Task.Run(EnsureConnected).WaitAsync(token);
+        if (!IsAuthenticated) throw new IOException("A sessão Steam não ficou autenticada.");
+        return _client;
+    }
+    internal IDisposable HoldOpen()
+    {
+        SuspendIdleTimeout();
+        return new Hold(this);
+    }
+    private sealed class Hold(SteamConnection owner) : IDisposable
+    {
+        private SteamConnection connection = owner;
+        public void Dispose() => Interlocked.Exchange(ref connection, null)?.ResumeIdleTimeout();
     }
 
     // Sends a CCloud RPC. Connects on demand, resets idle timer, retries on
@@ -155,19 +216,15 @@ public class SteamConnection : IDisposable
 
     public void SuspendIdleTimeout()
     {
+        if (_disposed) throw new ObjectDisposedException(nameof(SteamConnection));
         Interlocked.Increment(ref _idleSuspendCount);
-        _idleTimer?.Dispose();
-        _idleTimer = null;
+        Interlocked.Exchange(ref _idleTimer, null)?.Dispose();
     }
 
     public void ResumeIdleTimeout()
     {
-        if (Interlocked.Decrement(ref _idleSuspendCount) <= 0)
-        {
-            _idleSuspendCount = 0;
-            if (State == ConnectionState.Connected)
-                ResetIdleTimer();
-        }
+        if (Interlocked.Decrement(ref _idleSuspendCount) < 0) Interlocked.Exchange(ref _idleSuspendCount, 0);
+        if (!_disposed && State == ConnectionState.Connected) ResetIdleTimer();
     }
 
     // Enters Draining state: waits for pending RPCs to complete, then disconnects.
@@ -175,6 +232,7 @@ public class SteamConnection : IDisposable
     {
         lock (_stateLock)
         {
+            if (_disposed || _idleSuspendCount > 0) return;
             if (State != ConnectionState.Connected)
                 return;
             State = ConnectionState.Draining;
@@ -201,14 +259,25 @@ public class SteamConnection : IDisposable
 
     public void Dispose()
     {
-        Flush();
+        if (_shared) { Flush(); return; }
+        ShutdownShared();
+    }
+
+    internal void ShutdownShared()
+    {
+        lock (_stateLock) {
+            if (_disposed) return;
+            _disposed = true;
+            _idleTimer?.Dispose(); _idleTimer = null;
+            Teardown(); State = ConnectionState.Idle;
+        }
         _sendLock.Dispose();
         _connectedGate.Dispose();
     }
 
     private void EnsureConnected()
     {
-        if (State == ConnectionState.Connected)
+        if (IsAuthenticated)
         {
             ResetIdleTimer();
             return;
@@ -216,11 +285,15 @@ public class SteamConnection : IDisposable
 
         lock (_stateLock)
         {
-            if (State == ConnectionState.Connected)
+            if (_disposed) throw new ObjectDisposedException(nameof(SteamConnection));
+            if (IsAuthenticated)
             {
                 ResetIdleTimer();
                 return;
             }
+
+            if (_authenticationFailure != null)
+                throw new SteamLoginRequiredException(_authenticationFailure.Result);
 
             if (State == ConnectionState.Backoff)
             {
@@ -228,9 +301,18 @@ public class SteamConnection : IDisposable
                 Monitor.Exit(_stateLock);
                 Thread.Sleep(_backoffMs);
                 Monitor.Enter(_stateLock);
+                if (_disposed) throw new ObjectDisposedException(nameof(SteamConnection));
+                // Another cloud/gameplay borrower may have authenticated while
+                // this caller was outside the lock waiting for backoff.
+                if (IsAuthenticated) { ResetIdleTimer(); return; }
+                if (_authenticationFailure != null)
+                    throw new SteamLoginRequiredException(_authenticationFailure.Result);
             }
 
+            if (_client.IsConnected) Teardown();
             _connectError = null;
+            FriendDirectory.Reset();
+            _friendsReady = NewFriendsCompletion();
             _connectedGate.Reset();
             TransitionTo(ConnectionState.Connecting);
 
@@ -256,9 +338,11 @@ public class SteamConnection : IDisposable
 
             if (_connectError != null)
             {
+                var error = _connectError;
+                if (error is SteamLoginRequiredException rejected) _authenticationFailure = rejected;
                 Teardown();
                 EnterBackoff();
-                throw _connectError;
+                throw error;
             }
 
             _backoffMs = 0;
@@ -288,6 +372,7 @@ public class SteamConnection : IDisposable
 
     private void Teardown()
     {
+        _loggedOn = false;
         _callbackRunning = false;
         try
         {
@@ -311,24 +396,27 @@ public class SteamConnection : IDisposable
 
     private void ResetIdleTimer()
     {
-        if (_idleSuspendCount > 0)
+        if (_idleSuspendCount > 0 || _disposed)
             return;
 
-        _idleTimer?.Dispose();
-        _idleTimer = new Timer(
+        var timer = new Timer(
             _ =>
             {
-                if (State == ConnectionState.Connected)
-                {
+                lock (_stateLock) {
+                  if (!_disposed && _idleSuspendCount == 0 && State == ConnectionState.Connected) {
                     PatchHelper.Log("[Connection] Idle timeout, disconnecting");
                     Teardown();
                     TransitionTo(ConnectionState.Idle);
+                  }
                 }
             },
             null,
-            _defaultIdleTimeoutMs,
+            Timeout.Infinite,
             Timeout.Infinite
         );
+        Interlocked.Exchange(ref _idleTimer, timer)?.Dispose();
+        try { timer.Change(_defaultIdleTimeoutMs, Timeout.Infinite); }
+        catch (ObjectDisposedException) { /* A concurrent reset superseded this timer. */ }
     }
 
     private void TransitionTo(ConnectionState newState)

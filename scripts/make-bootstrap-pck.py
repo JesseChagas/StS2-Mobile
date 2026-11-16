@@ -29,6 +29,8 @@ _custom_features="dotnet"
 [application]
 
 config/name="sts2"
+boot_splash/show_image=false
+boot_splash/bg_color=Color(0.106, 0.157, 0.220, 1)
 config/features=PackedStringArray("4.5", "Forward Plus", "C#")
 run/main_scene=""
 

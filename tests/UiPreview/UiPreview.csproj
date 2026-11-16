@@ -1,0 +1,13 @@
+<Project Sdk="Godot.NET.Sdk/4.5.1">
+  <PropertyGroup><TargetFramework>net9.0</TargetFramework><EnableDynamicLoading>true</EnableDynamicLoading><EnableDefaultCompileItems>false</EnableDefaultCompileItems></PropertyGroup>
+  <ItemGroup>
+    <Compile Include="Preview.cs" />
+    <Compile Include="Stubs.cs" />
+    <Compile Include="../../src/STS2Mobile/Launcher/Design/*.cs" />
+    <Compile Include="../../src/STS2Mobile/Launcher/Components/*.cs" />
+    <Compile Include="../../src/STS2Mobile/Launcher/Sections/*.cs" />
+    <Compile Include="../../src/STS2Mobile/Launcher/LauncherView.cs" />
+    <Compile Include="../../src/STS2Mobile/Launcher/LoadingShell.cs" />
+    <Compile Include="../../src/STS2Mobile/Steam/BranchSettings.cs" />
+  </ItemGroup>
+</Project>

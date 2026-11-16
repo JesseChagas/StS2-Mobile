@@ -31,6 +31,8 @@ cp "$PUBLISH_DIR"/STS2Mobile.dll "$PUBLISH_DIR"/SteamKit2.dll \
    "$BCL_DIR/"
 
 cp "$ROOT/upstream/godot-export/.godot/mono/publish/arm64/GodotSharp.dll" "$BCL_DIR/"
+mkdir -p "$BUILD_DIR/libs/release/arm64-v8a"
+cp "$ROOT/native/steam-p2p/arm64-v8a/libsts2_gns.so" "$BUILD_DIR/libs/release/arm64-v8a/"
 
 CRYPTO_SO="$HOME/.nuget/packages/microsoft.netcore.app.runtime.mono.android-arm64/9.0.7/runtimes/android-arm64/native/libSystem.Security.Cryptography.Native.Android.so"
 if [ -f "$CRYPTO_SO" ]; then

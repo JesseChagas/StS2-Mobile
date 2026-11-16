@@ -8,6 +8,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using MegaCrit.Sts2.Core.Saves;
 using SteamKit2.Internal;
+using STS2Mobile.Patches;
 
 namespace STS2Mobile.Steam;
 
@@ -29,12 +30,14 @@ public class SteamKit2CloudSaveStore : ICloudSaveStore, ISaveStore, IDisposable
 
     public SteamKit2CloudSaveStore(string accountName, string refreshToken)
     {
-        _connection = new SteamConnection(accountName, refreshToken);
+        _connection = SharedSteamConnection.Get(accountName, refreshToken);
         _cache = new CloudFileCache(_connection);
         _writeQueue = new CloudWriteQueue();
 
         Instance = this;
     }
+
+    public bool WaitForPendingWrites(int timeoutMs) => _writeQueue.WaitForIdle(timeoutMs);
 
     public void Flush(int timeoutMs = 5000)
     {
@@ -234,6 +237,8 @@ public class SteamKit2CloudSaveStore : ICloudSaveStore, ISaveStore, IDisposable
     public string GetFullPath(string filename) => throw new NotImplementedException();
 
     public bool HasCloudFiles() => _cache.HasCloudFiles();
+
+    public bool HasUserEnabledCloudSync() => LauncherPatches.CloudSyncEnabled;
 
     public void ForgetFile(string path) => _cache.ForgetFile(path);
 

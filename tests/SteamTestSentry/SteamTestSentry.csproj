@@ -1,0 +1,1 @@
+<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>net9.0</TargetFramework><AssemblyName>Sentry.Godot</AssemblyName><AssemblyVersion>1.0.0.0</AssemblyVersion></PropertyGroup></Project>

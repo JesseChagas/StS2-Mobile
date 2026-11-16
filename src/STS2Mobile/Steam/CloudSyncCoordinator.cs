@@ -9,12 +9,29 @@ using MegaCrit.Sts2.Core.Saves.Managers;
 namespace STS2Mobile.Steam;
 
 // Stateless cloud sync coordinator: auto sync, manual push/pull, and save backups.
+public readonly record struct CloudTransferResult(int Successful, int Failed, int Skipped);
+
 public static class CloudSyncCoordinator
 {
     private const int MaxBackups = 50;
     private const int HistoryFileLimit = 100;
 
     internal static bool LocalBackupEnabled;
+    public static event Action<string> CloudDataApplied;
+
+    private static void NotifyApplied(string path)
+    {
+        if (!IsImportantSave(path))
+            return;
+        try
+        {
+            CloudDataApplied?.Invoke(path);
+        }
+        catch (Exception ex)
+        {
+            PatchHelper.Log($"[Cloud] Receipt tracking failed: {ex.Message}");
+        }
+    }
 
     public static async Task PushFileAsync(ISaveStore local, ICloudSaveStore cloud, string path)
     {
@@ -84,12 +101,14 @@ public static class CloudSyncCoordinator
                     var cloudTime = cloud.GetLastModifiedTime(path);
                     await local.WriteFileAsync(path, cloudContent);
                     local.SetLastModifiedTime(path, cloudTime);
+                    NotifyApplied(path);
                     return;
                 }
 
                 if (localContent == cloudContent)
                 {
                     PatchHelper.Log($"[Cloud] Sync: {path} identical, skipping");
+                    NotifyApplied(path);
                     return;
                 }
 
@@ -102,6 +121,7 @@ public static class CloudSyncCoordinator
                     var cloudTime = cloud.GetLastModifiedTime(path);
                     await local.WriteFileAsync(path, cloudContent);
                     local.SetLastModifiedTime(path, cloudTime);
+                    NotifyApplied(path);
                 }
                 else if (result == CompareResult.LocalWins)
                 {
@@ -117,11 +137,13 @@ public static class CloudSyncCoordinator
                     var cloudTime = cloud.GetLastModifiedTime(path);
                     await local.WriteFileAsync(path, cloudContent);
                     local.SetLastModifiedTime(path, cloudTime);
+                    NotifyApplied(path);
                 }
             }
             else if (cloudExists)
             {
                 await PullFileAsync(local, cloud, path);
+                NotifyApplied(path);
             }
             else if (localExists)
             {
@@ -134,7 +156,10 @@ public static class CloudSyncCoordinator
         }
     }
 
-    public static async Task ManualPushAllAsync(string accountName, string refreshToken)
+    public static async Task<CloudTransferResult> ManualPushAllAsync(
+        string accountName,
+        string refreshToken
+    )
     {
         var localStore = new GodotFileIo(UserDataPathProvider.GetAccountScopedBasePath(null));
         var cloudStore =
@@ -167,6 +192,7 @@ public static class CloudSyncCoordinator
 
         cloudStore.BeginSaveBatch();
         int count = 0;
+        int failed = 0;
         foreach (var path in paths)
         {
             try
@@ -181,15 +207,20 @@ public static class CloudSyncCoordinator
             }
             catch (Exception ex)
             {
+                failed++;
                 PatchHelper.Log($"[Cloud] Push: failed for {path}: {ex.Message}");
             }
         }
         cloudStore.EndSaveBatch();
 
         PatchHelper.Log($"[Cloud] Push complete: {count} files batched for upload");
+        return new CloudTransferResult(count, failed, 0);
     }
 
-    public static async Task ManualPullAllAsync(string accountName, string refreshToken)
+    public static async Task<CloudTransferResult> ManualPullAllAsync(
+        string accountName,
+        string refreshToken
+    )
     {
         var localStore = new GodotFileIo(UserDataPathProvider.GetAccountScopedBasePath(null));
         var cloudStore =
@@ -220,6 +251,7 @@ public static class CloudSyncCoordinator
 
         int downloaded = 0;
         int skipped = 0;
+        int failed = 0;
         foreach (var path in paths)
         {
             try
@@ -239,11 +271,13 @@ public static class CloudSyncCoordinator
             }
             catch (Exception ex)
             {
+                failed++;
                 PatchHelper.Log($"[Cloud] Pull: failed for {path}: {ex.Message}");
             }
         }
 
         PatchHelper.Log($"[Cloud] Pull complete: {downloaded} downloaded, {skipped} not in cloud");
+        return new CloudTransferResult(downloaded, failed, skipped);
     }
 
     public static List<string> GetSaveFilePaths(ISaveStore store)

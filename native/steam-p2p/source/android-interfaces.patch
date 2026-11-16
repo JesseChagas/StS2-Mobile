@@ -1,0 +1,22 @@
+--- a/src/steamnetworkingsockets/clientlib/steamnetworkingsockets_socketthread.cpp
++++ b/src/steamnetworkingsockets/clientlib/steamnetworkingsockets_socketthread.cpp
+@@ -11,6 +11,10 @@
+ #include <thread>
+ #include <mutex>
+ #include <atomic>
++
++#if defined(__ANDROID__)
++#include <ifaddrs.h> // bionic API 24+; the distributed Android build targets API 26.
++#endif
+ 
+ #include "steamnetworkingsockets_lowlevel.h"
+ #include "steamnetworkingsockets_mock.h"
+@@ -4225,7 +4229,7 @@
+     free( pAddrInfo );
+ 	return true;
+ 
+-#elif IsPosix() && !IsPlaystation() && !IsAndroid() && !IsNintendoSwitch()
++#elif IsPosix() && !IsPlaystation() && !IsNintendoSwitch()
+ 
+ 	ifaddrs *pMyAddrInfo = NULL;
+ 	int r = getifaddrs( &pMyAddrInfo );

@@ -6,6 +6,14 @@ using SteamKit2.Authentication;
 
 namespace STS2Mobile.Steam;
 
+public enum AuthNotice
+{
+    ApproveDevice,
+    DeviceCode,
+    EmailCode,
+    InvalidCode,
+}
+
 public record AuthResult(string AccountName, string RefreshToken, string GuardData);
 
 // Handles one-time interactive Steam login (password + 2FA). Creates a temporary
@@ -30,6 +38,7 @@ public class SteamAuth : IDisposable
     internal volatile bool NeedsReconnectForAuth;
 
     public event Action<string> LogMessage;
+    public event Action<AuthNotice> NoticeReceived;
 
     public SteamAuth()
     {
@@ -76,7 +85,8 @@ public class SteamAuth : IDisposable
     public async Task<AuthResult> LoginWithCredentialsAsync(
         string username,
         string password,
-        string guardData
+        string guardData,
+        CancellationToken cancellationToken = default
     )
     {
         if (!_connectedGate.IsSet)
@@ -90,18 +100,19 @@ public class SteamAuth : IDisposable
 
         Log($"Authenticating as '{username}'...");
 
+        cancellationToken.ThrowIfCancellationRequested();
         var authSession = await _client.Authentication.BeginAuthSessionViaCredentialsAsync(
             new AuthSessionDetails
             {
                 Username = username,
                 Password = password,
-                IsPersistentSession = true,
+                IsPersistentSession = SteamSessionPolicy.PersistentLauncherSession,
                 GuardData = guardData,
                 Authenticator = new AuthAuthenticator(this),
             }
-        );
+        ).WaitAsync(cancellationToken);
 
-        var pollResponse = await authSession.PollingWaitForResultAsync();
+        var pollResponse = await authSession.PollingWaitForResultAsync(cancellationToken);
 
         string newGuardData = pollResponse.NewGuardData ?? guardData;
 
@@ -168,6 +179,9 @@ public class SteamAuth : IDisposable
 
         public async Task<string> GetDeviceCodeAsync(bool previousCodeWasIncorrect)
         {
+            _auth.NoticeReceived?.Invoke(
+                previousCodeWasIncorrect ? AuthNotice.InvalidCode : AuthNotice.DeviceCode
+            );
             _auth.Log(
                 previousCodeWasIncorrect
                     ? "Previous 2FA code was incorrect, requesting new code"
@@ -182,6 +196,9 @@ public class SteamAuth : IDisposable
 
         public async Task<string> GetEmailCodeAsync(string email, bool previousCodeWasIncorrect)
         {
+            _auth.NoticeReceived?.Invoke(
+                previousCodeWasIncorrect ? AuthNotice.InvalidCode : AuthNotice.EmailCode
+            );
             _auth.Log(
                 previousCodeWasIncorrect
                     ? "Previous email code was incorrect, requesting new code"
@@ -196,6 +213,7 @@ public class SteamAuth : IDisposable
 
         public Task<bool> AcceptDeviceConfirmationAsync()
         {
+            _auth.NoticeReceived?.Invoke(AuthNotice.ApproveDevice);
             _auth.Log("Waiting for Steam mobile app confirmation...");
             return Task.FromResult(true);
         }

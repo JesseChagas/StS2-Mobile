@@ -1,7 +1,11 @@
-# Windows
-*.bat
-
-# Build outputs
+# Local game files and proprietary SDKs
+upstream/
+vendor/
+original.apk
+# Build and runtime output
+**/bin/
+**/obj/
+**/.godot/
 android/build/
 android/.gradle/
 android/.cxx/
@@ -9,44 +13,36 @@ android/assets/dotnet_bcl/
 android/local.properties
 android/res/values-*/godot_project_name_string.xml
 android/res/values/godot_project_name_string.xml
-src/patcher/bin/
-src/patcher/obj/
-src/STS2Mobile/bin/
-src/STS2Mobile/obj/
-
-# Large binary files
-*.tar.gz
-*.apk
-*.so
-*.pck
-*.aar
-*.aar.bak*
-*.jar
-*.keystore
-
-# Third-party sources & SDKs
-vendor/
-
-# FMOD logos (proprietary)
 android/assets/FMOD_LOGOS/
-
-# Upstream game files
-upstream/
-
-# Python venv
 venv/
-
-# Logs
+__pycache__/
+*.pyc
+# Device logs, credentials and signing material
+*.log
 logs.txt
-
-# Hidden directories
-.*
-!.gitignore
-
-# IDE
+startup-log.txt
+*.keystore
+*.jks
+*.pfx
+*.pem
+.env
+.env.*
+# Local packages and IDE state
+*.apk
+*.aab
+*.zip
+*.tar.gz
+*.aar
+*.jar
+*.pck
+*.pdb
 *.user
 *.suo
-
-# .NET
+.vs/
+.vscode/
+.idea/
 *.nupkg
-patchnotes.md
+# Native artifacts are excluded except reviewed transport builds
+*.so
+!native/steam-p2p/arm64-v8a/libsts2_gns.so
+!runtimes/linux-x64/native/libsts2_gns.so
