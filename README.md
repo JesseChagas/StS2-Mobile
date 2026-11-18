@@ -58,4 +58,4 @@ The launcher's MIT license does not replace the licenses of the game, engine com
 
 ## Website
 
-The bilingual landing page is a self-contained HTML file at [docs/index.html](docs/index.html), including screenshots, privacy policy and terms. No build or external assets are needed. To host on GitHub Pages, select Settings → Pages → Deploy from a branch → main → /docs. The main download button opens this repository; Releases contains published APKs when available.
+The bilingual landing page is a self-contained HTML file at [docs/index.html](docs/index.html), including screenshots, privacy policy and terms. No build or external assets are needed.
